@@ -2,13 +2,14 @@
 
 这里仅说明仓库内可执行部署资产；完整的阿里云准备、GitHub 配置、发布、验收和回滚步骤以 [`docs/guide/deployment/README.md`](../../docs/guide/deployment/README.md) 为准。
 
-当前已部署的阿里云后端按 UAT 原地升级：Spring profile 为 `demo`，监听 `127.0.0.1:8081`，使用独立 `myapp_worktree_` 数据库。未来 Prod 使用独立用户、配置、数据库和 `127.0.0.1:8080`，不得复用 UAT 数据或秘密。
+当前已部署的阿里云 Demo 是原地升级 UAT 的基础：旧服务以 Spring profile `demo` 监听 `127.0.0.1:8080`；只有 final cutover 才启动目标 `joysong@uat` 并监听 `127.0.0.1:8081`。UAT 沿用已核验的安全前缀 `myapp_worktree_` 数据库，未来 Prod 使用独立用户、配置、数据库和 `127.0.0.1:8080`，不得复用 UAT 数据或秘密。
 
 ## 资产
 
 | 路径 | 用途 |
 |---|---|
 | `host/bootstrap-host.sh` | 在现有 ECS 上安装发布用户、目录、受限 dispatcher 和 systemd 模板 |
+| `host/baseline-data-manifest.py` | 以 no-follow 双扫描检查持久数据树，并原子创建或校验 root-only baseline 清单 |
 | `host/deploy-release.sh` | 校验制品与运行时配置，原子切换 `current`/`previous`；migration 兼容时健康失败自动回滚，不兼容时撤下服务并保持维护态；保留最近 5 版 |
 | `host/backup-runtime-state.sh` | 每次切换前创建并校验 root-only 配置、持久目录与 UAT 数据库备份，并记录源/目标版本和精确 identity |
 | `host/restore-uat-backup-to-new-db.sh` | 校验备份并仅允许 dry-run 或恢复到全新 `myapp_worktree_restore_*` 数据库，绝不覆盖/drop 现有库 |
@@ -26,24 +27,15 @@
 
 ### 从现有 Demo 并行迁移
 
-迁移阶段必须保留现有 `joysong-demo`、端口 `8080`、旧目录、旧配置和旧数据不变。baseline 只做离线制品校验；final cutover 冻结旧写入并完成数据增量后，才会启动新服务在 `127.0.0.1:8081` 健康检查，健康通过后才允许切换 Nginx：
+迁移阶段必须保留现有 `joysong-demo`、端口 `8080`、旧目录、旧配置和旧数据不变。baseline 只做离线捕获与校验；final cutover 冻结旧写入并完成数据增量后，才会启动新服务在 `127.0.0.1:8081` 健康检查，健康通过后才允许切换 Nginx：
 
-1. 记录现有部署对应的 40 位 Git commit，确认现有服务仍为 active。
-2. 为当前安全前缀 UAT 数据库创建一致性备份，打印并人工核对数据库 host/name；把备份保存到 ECS root-only 路径。不得在此流程中 drop、truncate 或新建共享数据库。
+1. 分别记录现有 Server 与 Admin 制品对应的完整 40 位 Git commit，确认现有服务仍为 active。两者可以相同，但不得假定相同或用短 SHA 代替。
+2. 在任何主机变更前，按现有受控运维方式为当前安全前缀 UAT 数据库创建初始恢复备份，打印并人工核对数据库 host/name；把备份保存到 ECS root-only 路径。不得在此流程中 drop、truncate 或新建共享数据库。
 3. 把本目录安全传入 ECS，运行下面的 bootstrap；它不会停止或覆盖旧服务。
 4. 以旧配置为依据人工填写新的 `/etc/joysong/uat/joysong.env`，但必须改为 `demo`、`127.0.0.1:8081` 并通过全部支付门禁。原地迁移阶段新旧配置和旧服务实际进程的数据库 host、port、name、username 必须完全相同，且数据库名保持安全的 `myapp_worktree_` 前缀；baseline 会在任何复制前 fail-closed 比对。
-5. 运行 baseline 捕获命令。它会绑定旧 systemd MainPID、实际 JAR、8080 listener、环境文件、数据根和数据库身份，备份旧/新配置、数据库备份文件、Nginx、历史 uploads/private/staging 和旧制品；随后以 `--ignore-existing` 迁移三类持久数据并创建只读基线 release。`joysong@uat` 保持停止且禁用，避免两个调度器或启动任务接触同一数据库。
-6. 只有 baseline 命令成功并生成 `/etc/joysong/uat/BASELINE_CAPTURED`，且 DNS/TLS 已准备好后，才运行 final cutover 命令。该命令会重新核对全部旧服务/数据/数据库身份，持久打开维护事务、禁用并停止旧服务，确认旧 PID 与 8080 listener 消失，创建最终数据库和配置备份，以旧数据为权威完成 delta 同步与哈希核验，启用并核验 `joysong@uat` 的 MainPID/JAR/健康，再原子替换 Nginx 配置。
+5. 用固定运行时备份脚本创建带完整性标记的数据库备份，再运行 baseline 捕获命令。baseline 会绑定旧 systemd MainPID、实际 JAR、8080 listener、环境文件、数据根和数据库身份，备份旧/新配置、数据库备份文件、Nginx、历史 uploads/private/staging 和旧制品；随后以 `--ignore-existing` 迁移三类持久数据并创建只读基线 release。整个过程不启动或启用 `joysong@uat`，不执行 Flyway/Demo `Apply`，也不 reload/restart Nginx；现有 Demo 始终是唯一在线写实例。
+6. 只有 baseline 命令成功并生成 `/etc/joysong/uat/BASELINE_CAPTURED`，且 DNS/TLS 已准备好并取得明确 Go/No-Go 后，才运行 final cutover 命令。该命令会重新核对全部旧服务/数据/数据库身份，持久打开维护事务、冻结旧写入，确认旧 PID 与 8080 listener 消失，创建最终数据库和配置备份，以旧数据为权威完成 delta 同步与哈希核验，启动并核验 `joysong@uat` 的 MainPID/JAR/`127.0.0.1:8081` 健康，再原子替换并 reload Nginx。
 7. final cutover 失败时脚本会恢复旧 Nginx 配置并重启旧服务；成功时生成 `/etc/joysong/uat/CUTOVER_COMPLETED`，旧 `joysong-demo:8080` 停止并禁用但完整保留。后续自动部署同时要求 baseline 与 cutover 两个门禁。UAT 验收通过且观察期结束前不得删除旧服务、旧目录或备份。
-
-数据库备份命令需使用 root-only MySQL client 配置文件，避免密码进入命令历史。示意如下，实际 host/name 必须先打印确认且数据库名必须以 `myapp_worktree_` 开头：
-
-```bash
-printf 'Database host: %s\nDatabase name: %s\n' '<当前host>' '<myapp_worktree_...>'
-mysqldump --defaults-extra-file=/root/.my-uat.cnf --single-transaction \
-  --routines --triggers '<myapp_worktree_...>' | gzip > /root/uat-before-cicd.sql.gz
-gzip -t /root/uat-before-cicd.sql.gz
-```
 
 在把本目录安全传入 ECS 后，以 root 执行 bootstrap：
 
@@ -51,9 +43,20 @@ gzip -t /root/uat-before-cicd.sql.gz
 sudo bash host/bootstrap-host.sh <私有发布Bucket的完整主机名> <Nginx运行用户> <Nginx运行组>
 ```
 
-后两个参数默认都是 `www-data`；阿里云 Linux 常见安装可能需要显式传入 `nginx nginx`。脚本不会创建 `/etc/joysong/prod/DEPLOY_ENABLED`，因此不会意外打开生产发布。安装后需在验证配置无误的前提下重启一次 Nginx，使新增的只读 release 组生效。
+后两个参数默认都是 `www-data`；阿里云 Linux 常见安装可能需要显式传入 `nginx nginx`。真实私有发布 Bucket 尚未配置时，只允许为 bootstrap 传入不可解析的 `.invalid` 占位主机（例如 `release-bucket-unconfigured.invalid`）；这不会让发布可用，CI/CD 必须保持 fail-closed。启用自动部署前必须把 `/etc/joysong/deploy.env` 的 `RELEASE_URL_HOST` 替换为真实私有 Bucket 主机名并完成 OIDC/权限验证。脚本不会创建 `/etc/joysong/prod/DEPLOY_ENABLED`，因此不会意外打开生产发布。
 
-准备新 UAT 环境文件后，捕获旧部署基线：
+现有主机使用 Python 3.6 和不支持 `systemctl --value` 的旧 systemd；部署脚本必须保持兼容。bootstrap 只执行 `systemctl daemon-reload`，不授权在预备阶段 reload/restart Nginx。新增 Web 组成员关系及 Nginx 配置的生效统一延后到获批的 final cutover。
+
+准备并验证新 UAT 环境文件后，使用固定脚本生成 baseline 所需的带标记备份。它只在数据库全部基础表为 InnoDB、备份前后 scheduled EVENT 数量均为 `0` 时执行；dump 故意不导出 EVENT，并拒绝包含 `CREATE DATABASE` 或 `USE`：
+
+```bash
+sudo /usr/local/lib/joysong/backup-runtime-state.sh \
+  uat pre-baseline database <旧release标识> <基线release标识>
+```
+
+命令会打印精确 `BACKUP_PATH`。数据库凭据只放在 `/etc/mysql/joysong-uat-backup.cnf`（普通文件、`root:root`、`0600`），不得进入命令历史或应用环境文件。
+
+带标记备份完成后，捕获旧部署基线：
 
 ```bash
 sudo /usr/local/sbin/joysong-capture-uat-baseline \
@@ -62,15 +65,22 @@ sudo /usr/local/sbin/joysong-capture-uat-baseline \
   <旧Admin-dist绝对目录> \
   <旧环境文件绝对路径> \
   /var/lib/joysong-demo \
-  /root/uat-before-cicd.sql.gz \
-  <旧制品对应的40位Git提交>
+  <BACKUP_PATH>/database.sql.gz \
+  <旧Server制品对应的40位Git提交> \
+  <旧Admin制品对应的40位Git提交>
 ```
 
 第五个参数是旧持久数据根目录，必须包含 `uploads/`；`private/` 与 `upload-staging/`（兼容旧名 `staging/`）为可选目录。可选目录存在时会备份并迁移，不存在时脚本会留下明确审计记录且保持对应新目录不变。迁移后 private 与 staging 目录/文件分别强制为 `0700/0600`，只属于 `joysong-uat`，Nginx 不能读取；历史 uploads 使用 bootstrap 记录的 Web 组只读共享。环境数据根本身由 root 持有且不可被应用改名，应用仅能写指定的三个固定子目录。
 
-该命令不会修改旧服务或旧监听端口，也不会启动新服务或自动切换 Nginx。若缺少经校验的数据库备份、必需配置/`uploads` 数据来源、旧进程/JAR/listener 身份不一致或容量不足，它不会打开 `BASELINE_CAPTURED` 门禁，后续自动部署将被拒绝。
+Baseline 备份的 `data/**` 必须同时生成 root-only `DATA_MANIFEST.jsonl`。清单按原始路径字节排序并用 Base64 表示路径，记录数据根、目录、普通文件的类型、mode、uid、gid，以及普通文件的 size/SHA-256；链接、特殊文件、跨设备条目和多硬链文件一律拒绝。生成清单后脚本会重新扫描并逐项比对；清单以及 service、Nginx、data-migration 审计文件全部纳入备份根 `SHA256SUMS`。
 
-先把 `nginx/joysong-default-deny.conf` 安装为独立且全机唯一的 default server，并把 `nginx/joysong-uat-upstream.conf` 安装为全机唯一的 UAT upstream/限流定义，再通过 `nginx -t`。随后准备好仓库中的新 UAT Nginx 配置，执行一次最终切流（活动配置必须是 `/etc/nginx/` 下的现有普通文件）：
+最后两个参数分别是完整 server commit 与完整 admin commit。脚本解析实际 JAR 和 Admin 路径后，会分别校验其 release 目录携带对应 commit 的 SHA8；任一不符即 fail-closed。两条来源会写入基线 manifest 的 `baselineSourceCommits` 和 root-only `BASELINE_CAPTURED`，为既有手工部署保留可审计 provenance。此双来源仅属于历史 baseline：正常 CI 构建仍要求 Server 与 Admin 来自同一个完整 `GITHUB_SHA`，manifest 保持单一 `commit`。
+
+历史 Demo 环境文件实测含两条未加 `#` 的 ASCII 裸行。兼容仅作用于旧环境文件：每条 ignored line 必须按脚本内精确的“上一赋值键 + 裸行 SHA-256” allowlist 匹配，且各自只能出现一次；未知摘要、位置错误、重复出现或新 `/etc/joysong/uat/joysong.env` 中的任何裸行均 fail-closed。审计记录只保存 ignored line 的 count 与摘要，不输出原文；旧原文件仍完整保存为 root-only 备份并纳入 `SHA256SUMS`。
+
+该命令不会修改旧服务或旧监听端口，不会启动/启用新服务，不会执行 Flyway、Demo `Apply` 或应用健康检查，也不会安装、reload/restart Nginx。若缺少同目录 `BACKUP_COMPLETE`/`SHA256SUMS` 绑定并校验通过的数据库备份、必需配置/`uploads` 数据来源、旧进程/JAR/listener 身份不一致或容量不足，它不会打开 `BASELINE_CAPTURED` 门禁，后续自动部署将被拒绝。
+
+预备阶段只把新 Nginx 模板保存到活动配置目录之外，不安装或重载。完成 DNS/TLS 和 Go/No-Go 后，在最终切流维护窗口内准备全机唯一的 default-deny 与 UAT upstream/限流定义并通过 `nginx -t`，随后执行 final cutover；该命令验证新服务后才原子替换活动配置并 reload Nginx（活动配置必须是 `/etc/nginx/` 下的现有普通文件）：
 
 ```bash
 sudo /usr/local/sbin/joysong-finalize-uat-cutover \
@@ -80,7 +90,7 @@ sudo /usr/local/sbin/joysong-finalize-uat-cutover \
   <当前旧站点的/etc/nginx/...conf绝对路径>
 ```
 
-最终 delta 阶段不使用 `--ignore-existing`：旧服务已停止，其数据树是唯一权威来源，变化文件必须覆盖初次基线副本，目标多余文件会在完整备份后由 `--delete` 清理；旧 private/staging 不存在时对应新目录明确收敛为空。同步后执行双向完整树哈希核验。失败回退可从命令输出的 root-only cutover 备份恢复，旧数据根从未被改写。
+旧 Demo 在 baseline 捕获期间仍在线，因此初次数据副本只是一份迁移 seed，不是权威快照。最终 delta 阶段不使用 `--ignore-existing`：旧服务已停止，其数据树才是唯一权威来源，变化文件必须覆盖 seed，目标多余文件会在完整备份后由 `--delete` 清理；旧 private/staging 不存在时对应新目录明确收敛为空。同步后执行源/目标双向完整树哈希核验，通过后目标数据才成为权威。失败回退可从命令输出的 root-only cutover 备份恢复，旧数据根从未被改写。
 
 安装后分别填写 root 管理的配置：
 
@@ -97,7 +107,7 @@ Prod 还必须准备 `/etc/joysong/prod/rds-binding.env`（`root:root`、`0600`�
 
 ## Nginx 与图片边界
 
-管理后台使用 `joyingsong.net`，API 和公开日记分享页使用 `api.joyingsong.net`。安装或切换模板后必须先验证再重载：
+管理后台使用 `joyingsong.net`，API 和公开日记分享页使用 `api.joyingsong.net`。以下命令只属于获批的最终切流或后续 Nginx 变更窗口；预备阶段禁止执行。安装或切换模板后必须先验证再重载：
 
 ```bash
 sudo nginx -t
@@ -108,7 +118,7 @@ sudo systemctl reload nginx
 
 ## GitHub Actions 边界
 
-Actions 负责构建、测试、扫描、签名、生成 manifest/SHA-256/SBOM，并通过 GitHub OIDC、私有发布 Bucket 和 Cloud Assistant 原地升级现有 ECS。每次 UAT 切换前，ECS 固定脚本都会创建 root-only 配置/数据库备份并记录源/目标 release、DB host/name、dump SHA 和精确路径；SHA/gzip 成功只证明备份完整可读，不等于应用恢复验收。SQL dump 不含 `CREATE DATABASE`/`USE`。恢复工具默认 dry-run，只有显式 `--execute` 才创建一个此前不存在的 `myapp_worktree_restore_*` 数据库，绝不覆盖或 drop 当前库：
+Actions 负责构建、测试、扫描、签名、生成 manifest/SHA-256/SBOM，并通过 GitHub OIDC、私有发布 Bucket 和 Cloud Assistant 原地升级现有 ECS。每次 UAT 切换前，ECS 固定脚本都会创建 root-only 配置/数据库备份并记录源/目标 release、DB host/name、dump SHA 和精确路径；SHA/gzip 成功只证明备份完整可读，不等于应用恢复验收。在线逻辑备份要求全部基础表为 InnoDB 且 scheduled EVENT 为 `0`；SQL dump 不导出 EVENT，也不含 `CREATE DATABASE`/`USE`。恢复工具默认 dry-run，只有显式 `--execute` 才创建一个此前不存在的 `myapp_worktree_restore_*` 数据库，绝不覆盖或 drop 当前库：
 
 ```bash
 sudo /usr/local/sbin/joysong-restore-uat-backup \

@@ -8,6 +8,14 @@ usage() {
   exit 2
 }
 
+systemctl_property_value() {
+  local unit="$1" property="$2" line
+  line="$(systemctl show -p "$property" "$unit" 2>/dev/null || true)"
+  line="${line%%$'\n'*}"
+  [[ "$line" == "${property}="* ]] || return 0
+  printf '%s' "${line#*=}"
+}
+
 [[ "$EUID" -eq 0 ]] || { printf 'run as root\n' >&2; exit 2; }
 (($# == 4)) || usage
 install -d -o root -g root -m 0755 /run/lock
@@ -17,6 +25,9 @@ old_service="$1"
 old_data_root="$2"
 new_nginx_config="$3"
 active_nginx_config="$4"
+readonly baseline_marker=/etc/joysong/uat/BASELINE_CAPTURED
+readonly baseline_backup_parent=/var/backups/joysong/uat-bootstrap
+readonly data_manifest_helper=/usr/local/lib/joysong/baseline-data-manifest.py
 
 [[ "$old_service" =~ ^[A-Za-z0-9@_.-]+$ ]] || usage
 for path_value in "$old_data_root" "$new_nginx_config" "$active_nginx_config"; do
@@ -32,8 +43,62 @@ done
   printf 'active Nginx config must already be a regular file\n' >&2
   exit 2
 }
-if [[ ! -f /etc/joysong/uat/BASELINE_CAPTURED ]] ||
-   ! grep -Eq '^BASELINE_CAPTURED=true$' /etc/joysong/uat/BASELINE_CAPTURED; then
+if [[ ! -f "$baseline_marker" || -L "$baseline_marker" ||
+      "$(stat -c '%U:%G:%a' "$baseline_marker" 2>/dev/null || true)" != "root:root:600" ]]; then
+  printf 'baseline gate must be a root:root mode 0600 regular non-link file\n' >&2
+  exit 2
+fi
+python3 - "$baseline_marker" <<'PY'
+import os
+import re
+import stat
+import sys
+
+path_value = os.fsencode(sys.argv[1])
+initial_stat = os.lstat(path_value)
+stable_fields = (
+    "st_dev", "st_ino", "st_mode", "st_nlink", "st_uid", "st_gid",
+    "st_size", "st_mtime_ns", "st_ctime_ns",
+)
+if (not stat.S_ISREG(initial_stat.st_mode) or stat.S_ISLNK(initial_stat.st_mode) or
+        initial_stat.st_nlink != 1 or initial_stat.st_uid != 0 or initial_stat.st_gid != 0 or
+        stat.S_IMODE(initial_stat.st_mode) != 0o600):
+    raise SystemExit("baseline gate ownership or mode is unsafe")
+descriptor = os.open(path_value, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+try:
+    opened_stat = os.fstat(descriptor)
+    if any(getattr(initial_stat, field) != getattr(opened_stat, field) for field in stable_fields):
+        raise SystemExit("baseline gate changed before reading")
+    chunks = []
+    while True:
+        chunk = os.read(descriptor, 1024 * 1024)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    final_stat = os.fstat(descriptor)
+    if any(getattr(opened_stat, field) != getattr(final_stat, field) for field in stable_fields):
+        raise SystemExit("baseline gate changed while reading")
+finally:
+    os.close(descriptor)
+content = b"".join(chunks)
+if b"\r" in content:
+    raise SystemExit("baseline gate contains a carriage return")
+seen = set()
+for line in content.split(b"\n"):
+    if not line:
+        continue
+    if b"=" not in line:
+        raise SystemExit("baseline gate contains an unsupported line")
+    key, value = line.split(b"=", 1)
+    if re.fullmatch(br"[A-Z][A-Z0-9_]*", key) is None or not value:
+        raise SystemExit("baseline gate contains an unsafe key or empty value")
+    if key in seen:
+        raise SystemExit("baseline gate contains a duplicate key")
+    seen.add(key)
+if b"BASELINE_CAPTURED" not in seen:
+    raise SystemExit("baseline gate lacks BASELINE_CAPTURED")
+PY
+if ! grep -Eq '^BASELINE_CAPTURED=true$' "$baseline_marker"; then
   printf 'successful UAT baseline capture is required\n' >&2
   exit 2
 fi
@@ -42,10 +107,10 @@ fi
     exit 2
   }
 read_baseline_value() {
-  local key="$1" marker=/etc/joysong/uat/BASELINE_CAPTURED count value
-  count="$(grep -Ec "^${key}=" "$marker" || true)"
+  local key="$1" count value
+  count="$(grep -Ec "^${key}=" "$baseline_marker" || true)"
   [[ "$count" == "1" ]] || { printf 'baseline gate must contain exactly one %s\n' "$key" >&2; exit 2; }
-  value="$(sed -n "s/^${key}=//p" "$marker")"
+  value="$(sed -n "s/^${key}=//p" "$baseline_marker")"
   [[ -n "$value" && "$value" != *$'\r'* && "$value" != *$'\n'* ]] || {
     printf 'baseline gate contains unsafe %s\n' "$key" >&2
     exit 2
@@ -64,7 +129,142 @@ baseline_old_jar="$(read_baseline_value OLD_JAR)"
 baseline_old_jar_sha256="$(read_baseline_value OLD_JAR_SHA256)"
 baseline_old_env="$(read_baseline_value OLD_ENV)"
 baseline_old_data_root="$(read_baseline_value OLD_DATA_ROOT)"
+baseline_backup_root="$(read_baseline_value BACKUP_ROOT)"
+baseline_data_manifest_path="$(read_baseline_value DATA_MANIFEST_PATH)"
+baseline_data_manifest_sha256="$(read_baseline_value DATA_MANIFEST_SHA256)"
+baseline_old_env_ignored_line_count="$(read_baseline_value OLD_ENV_IGNORED_LINE_COUNT)"
+baseline_old_env_ignored_line_sha256="$(read_baseline_value OLD_ENV_IGNORED_LINE_SHA256)"
 [[ "$baseline_tag" == "v0.0.0-uat.0" ]] || { printf 'unexpected baseline release tag\n' >&2; exit 2; }
+[[ -d "$baseline_backup_parent" && ! -L "$baseline_backup_parent" &&
+   "$(readlink -f -- "$baseline_backup_parent")" == "$baseline_backup_parent" ]] || {
+  printf 'canonical baseline backup parent is unavailable\n' >&2
+  exit 2
+}
+[[ "$baseline_backup_root" == "$baseline_backup_parent/"* &&
+   "$(dirname -- "$baseline_backup_root")" == "$baseline_backup_parent" &&
+   -n "$(basename -- "$baseline_backup_root")" &&
+   "$(basename -- "$baseline_backup_root")" != "." &&
+   "$(basename -- "$baseline_backup_root")" != ".." ]] || {
+  printf 'baseline BACKUP_ROOT must be one direct child of the canonical backup parent\n' >&2
+  exit 2
+}
+[[ -d "$baseline_backup_root" && ! -L "$baseline_backup_root" &&
+   "$(readlink -f -- "$baseline_backup_root")" == "$baseline_backup_root" &&
+   "$(stat -c '%U:%G:%a' "$baseline_backup_root")" == "root:root:700" ]] || {
+  printf 'baseline BACKUP_ROOT is unavailable, non-canonical or not root-only\n' >&2
+  exit 2
+}
+expected_data_manifest_path="$baseline_backup_root/DATA_MANIFEST.jsonl"
+[[ "$baseline_data_manifest_path" == "$expected_data_manifest_path" &&
+   "$baseline_data_manifest_sha256" =~ ^[0-9a-f]{64}$ ]] || {
+  printf 'baseline data manifest marker binding is invalid\n' >&2
+  exit 2
+}
+[[ -f "$data_manifest_helper" && ! -L "$data_manifest_helper" && -x "$data_manifest_helper" &&
+   "$(stat -c '%U:%G:%a' "$data_manifest_helper")" == "root:root:755" ]] || {
+  printf 'root-owned baseline data manifest helper is unavailable\n' >&2
+  exit 2
+}
+[[ -f "$baseline_data_manifest_path" && ! -L "$baseline_data_manifest_path" &&
+   "$(stat -c '%U:%G:%a' "$baseline_data_manifest_path")" == "root:root:600" ]] || {
+  printf 'baseline data manifest is not a root-only regular file\n' >&2
+  exit 2
+}
+[[ "$(sha256sum "$baseline_data_manifest_path" 2>/dev/null | awk '{ print $1 }')" == \
+   "$baseline_data_manifest_sha256" ]] || {
+  printf 'baseline data manifest SHA-256 no longer matches its marker binding\n' >&2
+  exit 2
+}
+
+baseline_checksum_file="$baseline_backup_root/SHA256SUMS"
+baseline_checksum_names=(
+  old-server.jar
+  old-admin.tar.gz
+  database.sql.gz
+  source-database-BACKUP_COMPLETE
+  source-database-SHA256SUMS
+  old-joysong.env
+  new-joysong.env
+  nginx-config.tar.gz
+  old-service.txt
+  old-service-status.txt
+  nginx.txt
+  data-migration.txt
+  DATA_MANIFEST.jsonl
+)
+python3 - "$baseline_backup_root" "$baseline_checksum_file" "${baseline_checksum_names[@]}" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+
+backup_root = os.fsencode(sys.argv[1])
+checksum_path = os.fsencode(sys.argv[2])
+expected_names = [os.fsencode(value) for value in sys.argv[3:]]
+if len(expected_names) != 13:
+    raise SystemExit("baseline checksum contract must contain exactly 13 files")
+stable_fields = (
+    "st_dev", "st_ino", "st_mode", "st_nlink", "st_uid", "st_gid",
+    "st_size", "st_mtime_ns", "st_ctime_ns",
+)
+
+
+def read_root_only(path_value, label, capture_content=False):
+    initial_stat = os.lstat(path_value)
+    if (not stat.S_ISREG(initial_stat.st_mode) or stat.S_ISLNK(initial_stat.st_mode) or
+            initial_stat.st_nlink != 1 or initial_stat.st_uid != 0 or initial_stat.st_gid != 0 or
+            stat.S_IMODE(initial_stat.st_mode) != 0o600):
+        raise SystemExit("{} must be a root:root mode 0600 regular non-link file".format(label))
+    descriptor = os.open(path_value, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        opened_stat = os.fstat(descriptor)
+        if any(getattr(initial_stat, field) != getattr(opened_stat, field) for field in stable_fields):
+            raise SystemExit("{} changed before reading".format(label))
+        value = hashlib.sha256()
+        chunks = [] if capture_content else None
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            value.update(chunk)
+            if capture_content:
+                chunks.append(chunk)
+        final_stat = os.fstat(descriptor)
+        if any(getattr(opened_stat, field) != getattr(final_stat, field) for field in stable_fields):
+            raise SystemExit("{} changed while reading".format(label))
+    finally:
+        os.close(descriptor)
+    content = b"".join(chunks) if capture_content else None
+    return content, value.hexdigest().encode("ascii")
+
+
+checksum_content, _ = read_root_only(checksum_path, "baseline SHA256SUMS", capture_content=True)
+checksum_lines = checksum_content.splitlines()
+if len(checksum_lines) != 13:
+    raise SystemExit("baseline SHA256SUMS must contain exactly 13 entries")
+actual_names = []
+expected_digests = []
+for line in checksum_lines:
+    match = re.fullmatch(br"([0-9a-f]{64})  ([A-Za-z0-9._-]+)", line)
+    if match is None:
+        raise SystemExit("baseline SHA256SUMS contains an unsupported line")
+    expected_digests.append(match.group(1))
+    actual_names.append(match.group(2))
+if actual_names != expected_names:
+    raise SystemExit("baseline SHA256SUMS does not contain the exact approved 13-file set")
+for name, expected_digest in zip(actual_names, expected_digests):
+    _, actual_digest = read_root_only(os.path.join(backup_root, name), os.fsdecode(name))
+    if actual_digest != expected_digest:
+        raise SystemExit("baseline SHA256SUMS verification failed for {}".format(os.fsdecode(name)))
+PY
+"$data_manifest_helper" verify "$baseline_backup_root/data" "$baseline_data_manifest_path"
+
+[[ "$baseline_old_env_ignored_line_count" =~ ^[0-9]+$ &&
+   "$baseline_old_env_ignored_line_sha256" =~ ^[0-9a-f]{64}$ ]] || {
+  printf 'baseline legacy environment audit binding is invalid\n' >&2
+  exit 2
+}
 old_data_root="$(readlink -f -- "$old_data_root")"
 baseline_old_env="$(readlink -f -- "$baseline_old_env")"
 baseline_old_jar="$(readlink -f -- "$baseline_old_jar")"
@@ -96,7 +296,7 @@ if systemctl is-active --quiet joysong@uat.service || systemctl is-enabled --qui
   printf 'managed UAT must remain inactive and disabled between baseline validation and final cutover\n' >&2
   exit 2
 fi
-old_pid="$(systemctl show --property MainPID --value "$old_service" 2>/dev/null || true)"
+old_pid="$(systemctl_property_value "$old_service" MainPID)"
 [[ "$old_pid" =~ ^[1-9][0-9]*$ && "$old_pid" != "1" && -r "/proc/$old_pid/environ" ]] || {
   printf 'old service process environment is unavailable\n' >&2
   exit 2
@@ -130,13 +330,44 @@ import re
 import sys
 from urllib.parse import urlsplit
 
-def read_environment(path_value: str) -> dict[str, str]:
-    values: dict[str, str] = {}
+LEGACY_OLD_ENV_LINE_ALLOWLIST = frozenset({
+    (
+        "SPRING_AUTOCONFIGURE_EXCLUDE",
+        "5bf8aa57fc5a6bc547decf1cc6db63f10deb55a3c6c5df497d631fb3d95e1abf",
+    ),
+    (
+        "OSS_PRIVATE_BUCKET_NAME",
+        "733e034005783808dcc93b5c3683e47cd536f7d3cc6c1141dae9742304cd7069",
+    ),
+})
+
+def consume_approved_legacy_line(previous_assignment_key, line_sha256, seen_lines):
+    provenance = (previous_assignment_key, line_sha256)
+    if provenance not in LEGACY_OLD_ENV_LINE_ALLOWLIST or provenance in seen_lines:
+        return None
+    seen_lines.add(provenance)
+    return provenance
+
+def read_environment(path_value, allow_legacy_lines=False):
+    values = {}
+    ignored_lines = []
+    seen_legacy_lines = set()
+    previous_assignment_key = None
     for raw in pathlib.Path(path_value).read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith(("#", ";")):
             continue
         if "=" not in line:
+            if allow_legacy_lines:
+                line_sha256 = hashlib.sha256(line.encode("utf-8")).hexdigest()
+                provenance = consume_approved_legacy_line(
+                    previous_assignment_key,
+                    line_sha256,
+                    seen_legacy_lines,
+                )
+                if provenance is not None:
+                    ignored_lines.append(provenance)
+                    continue
             raise SystemExit(f"unsupported environment line in {path_value}")
         key, value = line.split("=", 1)
         key = key.strip()
@@ -146,41 +377,72 @@ def read_environment(path_value: str) -> dict[str, str]:
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
         values[key] = value
-    return values
+        previous_assignment_key = key
+    return values, ignored_lines
 
-def read_process_environment(path_value: str) -> dict[str, str]:
-    values: dict[str, str] = {}
+def read_process_environment(path_value):
+    values = {}
     for item in pathlib.Path(path_value).read_bytes().split(b"\0"):
         if not item:
             continue
         key_bytes, separator, value_bytes = item.partition(b"=")
-        if separator:
-            values[key_bytes.decode("utf-8")] = value_bytes.decode("utf-8")
+        if not separator:
+            continue
+        key = key_bytes.decode("utf-8")
+        if key in values:
+            raise SystemExit(f"duplicate {key} in old service process environment")
+        values[key] = value_bytes.decode("utf-8")
     return values
 
-def identity(values: dict[str, str], label: str):
+def identity(values, label):
     url = values.get("DB_URL", "")
     if not url.startswith("jdbc:mysql://"):
         raise SystemExit(f"DB_URL is missing or is not MySQL in {label}")
-    parsed = urlsplit("mysql://" + url.removeprefix("jdbc:mysql://"))
+    parsed = urlsplit("mysql://" + url[len("jdbc:mysql://"):])
     database = parsed.path.lstrip("/")
+    if not parsed.hostname or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", database):
+        raise SystemExit(f"DB_URL lacks a safe host/database in {label}")
     username = values.get("DB_USERNAME", "")
-    if not parsed.hostname or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", database) or not username:
-        raise SystemExit(f"database identity is incomplete in {label}")
+    if not username:
+        raise SystemExit(f"DB_USERNAME is missing in {label}")
     return parsed.hostname.lower(), parsed.port or 3306, database, username
 
-old_config = identity(read_environment(sys.argv[1]), "captured old config")
-new_config = identity(read_environment(sys.argv[2]), "managed UAT config")
+old_values, ignored_old_lines = read_environment(sys.argv[1], allow_legacy_lines=True)
+new_values, ignored_new_lines = read_environment(sys.argv[2])
+if ignored_new_lines:
+    raise SystemExit("new UAT config unexpectedly ignored an environment line")
+old_config = identity(old_values, "captured old config")
+new_config = identity(new_values, "managed UAT config")
 old_live = identity(read_process_environment(sys.argv[3]), "old service process")
 if not old_config == new_config == old_live:
     raise SystemExit("old config, old live process and managed UAT config no longer use the same database")
-digest = hashlib.sha256(json.dumps(old_config, separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
-print(f"{digest}|{old_config[0]}|{old_config[1]}|{old_config[2]}")
+digest = hashlib.sha256(
+    json.dumps(old_config, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+).hexdigest()
+normalized_old_lines = sorted(ignored_old_lines)
+ignored_lines_digest = hashlib.sha256(
+    json.dumps(
+        normalized_old_lines,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+).hexdigest()
+print(
+    f"{digest}|{old_config[0]}|{old_config[1]}|{old_config[2]}|"
+    f"{len(normalized_old_lines)}|{ignored_lines_digest}"
+)
 PY
 )"
-IFS='|' read -r current_database_identity database_host database_port database_name <<<"$current_database_identity_line"
+IFS='|' read -r current_database_identity database_host database_port database_name \
+  current_old_env_ignored_line_count current_old_env_ignored_line_sha256 \
+  <<<"$current_database_identity_line"
 [[ "$current_database_identity" == "$baseline_database_identity" ]] || {
   printf 'UAT database identity changed after baseline capture; refusing final cutover\n' >&2
+  exit 2
+}
+[[ "$current_old_env_ignored_line_count" == "$baseline_old_env_ignored_line_count" &&
+   "$current_old_env_ignored_line_sha256" == "$baseline_old_env_ignored_line_sha256" ]] || {
+  printf 'legacy old environment ignored-line audit changed after baseline capture\n' >&2
   exit 2
 }
 printf 'Final cutover database: host=%s port=%s name=%s\n' "$database_host" "$database_port" "$database_name"
@@ -208,18 +470,15 @@ elif [[ -e "$old_data_root/upload-staging" || -e "$old_data_root/staging" ]]; th
   exit 2
 fi
 
-validate_tree() {
-  local label="$1" root="$2" unsafe
-  unsafe="$(find "$root" -xdev ! -type d ! -type f -print -quit)"
-  [[ -z "$unsafe" ]] || {
-    printf '%s contains a link or special file: %s\n' "$label" "$unsafe" >&2
-    exit 2
-  }
+check_old_live_data_roots() {
+  "$data_manifest_helper" check "$old_uploads"
+  [[ -z "$old_private" ]] || "$data_manifest_helper" check "$old_private"
+  [[ -z "$old_staging" ]] || "$data_manifest_helper" check "$old_staging"
 }
 
-validate_tree old-uploads "$old_uploads"
-[[ -z "$old_private" ]] || validate_tree old-private "$old_private"
-[[ -z "$old_staging" ]] || validate_tree old-staging "$old_staging"
+# This first structural snapshot is intentionally before maintenance or either
+# service stop. A later frozen snapshot closes the write-freeze TOCTOU window.
+check_old_live_data_roots
 validate_new_data_targets() {
   [[ -d /var/lib/joysong/uat && ! -L /var/lib/joysong/uat ]] || {
     printf 'new UAT data root is unsafe\n' >&2
@@ -235,7 +494,7 @@ validate_new_data_targets() {
       printf 'new UAT data target is unsafe: %s\n' "$target" >&2
       return 1
     }
-    validate_tree new-uat-data "$target"
+    "$data_manifest_helper" check "$target"
   done
 }
 validate_new_data_targets
@@ -249,7 +508,7 @@ fi
 verify_uat_service() {
   local pid cmdline resolved_jar
   systemctl is-active --quiet joysong@uat.service || return 1
-  pid="$(systemctl show --property MainPID --value joysong@uat.service 2>/dev/null || true)"
+  pid="$(systemctl_property_value joysong@uat.service MainPID)"
   resolved_jar="$(readlink -f /opt/joysong/uat/current/server.jar 2>/dev/null || true)"
   [[ "$pid" =~ ^[1-9][0-9]*$ && "$pid" != "1" && -r "/proc/$pid/cmdline" && -n "$resolved_jar" ]] || return 1
   cmdline="$(tr '\0' '\n' <"/proc/$pid/cmdline" 2>/dev/null || true)"
@@ -400,9 +659,7 @@ fi
   printf 'old backend listener on 8080 remains after write freeze\n' >&2
   exit 1
 }
-validate_tree frozen-old-uploads "$old_uploads"
-[[ -z "$old_private" ]] || validate_tree frozen-old-private "$old_private"
-[[ -z "$old_staging" ]] || validate_tree frozen-old-staging "$old_staging"
+check_old_live_data_roots
 validate_new_data_targets
 
 /usr/local/lib/joysong/backup-runtime-state.sh uat "cutover-$timestamp" database \
@@ -423,6 +680,9 @@ empty_source="$cutover_backup/empty-source"
 install -d -o root -g root -m 0700 "$empty_source"
 final_private_source="${old_private:-$empty_source}"
 final_staging_source="${old_staging:-$empty_source}"
+# Recheck immediately before the authoritative delta rsync. Even while the
+# application is frozen, an out-of-band filesystem mutation must fail closed.
+check_old_live_data_roots
 rsync -ax --checksum --delete --chown="joysong-uat:$web_group" "$old_uploads/" /var/lib/joysong/uat/uploads/
 rsync -ax --checksum --delete --chown=joysong-uat:joysong-uat "$final_private_source/" /var/lib/joysong/uat/private/
 rsync -ax --checksum --delete --chown=joysong-uat:joysong-uat "$final_staging_source/" /var/lib/joysong/uat/upload-staging/
@@ -432,6 +692,7 @@ find /var/lib/joysong/uat/uploads -type f -exec chmod 0640 {} +
 chown -R joysong-uat:joysong-uat /var/lib/joysong/uat/private /var/lib/joysong/uat/upload-staging
 find /var/lib/joysong/uat/private /var/lib/joysong/uat/upload-staging -type d -exec chmod 0700 {} +
 find /var/lib/joysong/uat/private /var/lib/joysong/uat/upload-staging -type f -exec chmod 0600 {} +
+validate_new_data_targets
 
 python3 - "$old_uploads" /var/lib/joysong/uat/uploads \
   "$final_private_source" /var/lib/joysong/uat/private \

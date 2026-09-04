@@ -26,6 +26,7 @@ command -v mysqldump >/dev/null || { printf 'MySQL client/mysqldump must be inst
 command -v gzip >/dev/null || { printf 'gzip must be installed first\n' >&2; exit 2; }
 command -v rsync >/dev/null || { printf 'rsync must be installed first\n' >&2; exit 2; }
 
+install -d -o root -g root -m 0755 /var/lib/joysong
 id joysong-deploy >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin joysong-deploy
 for environment in uat prod; do
   service_user="joysong-${environment}"
@@ -59,6 +60,7 @@ install -d -o root -g root -m 0755 /usr/local/lib/joysong /usr/local/sbin /etc/j
 install -o root -g root -m 0755 "$deploy_root/host/deploy-release.sh" /usr/local/lib/joysong/deploy-release.sh
 install -o root -g root -m 0755 "$deploy_root/host/validate-runtime-config.sh" /usr/local/lib/joysong/validate-runtime-config.sh
 install -o root -g root -m 0755 "$deploy_root/host/backup-runtime-state.sh" /usr/local/lib/joysong/backup-runtime-state.sh
+install -o root -g root -m 0755 "$deploy_root/host/baseline-data-manifest.py" /usr/local/lib/joysong/baseline-data-manifest.py
 install -o root -g root -m 0755 "$deploy_root/host/restore-uat-backup-to-new-db.sh" /usr/local/sbin/joysong-restore-uat-backup
 install -o root -g root -m 0755 "$deploy_root/host/joysong-release-dispatch" /usr/local/sbin/joysong-release-dispatch
 install -o root -g root -m 0755 "$deploy_root/host/capture-existing-uat-baseline.sh" /usr/local/sbin/joysong-capture-uat-baseline

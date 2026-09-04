@@ -180,11 +180,17 @@ GitHub 中不得保存数据库、JWT、AI、翻译、SMS 或应用 OSS 的运�
 - 上传使用 OSS 服务端 `forbid-overwrite` 条件完成一次原子 PutObject；任何“已存在”或无法确认状态都失败，不使用存在性检查后再上传的竞态流程；
 - 生命周期只清理由明确规则覆盖的临时对象，不删除 GitHub Release、服务器 `current`/`previous` 或失败审计引用所需制品。
 
+当前尚未配置真实的私有发布 Bucket。若只执行主机 bootstrap，可以使用保留 `.invalid` 域中的不可解析占位主机（例如 `release-bucket-unconfigured.invalid`）；该占位值只用于完成目录、用户和固定脚本安装，不能用于上传、下载或部署。占位值存在期间 CI/CD 必须保持 fail-closed，不得创建发布 tag 触发部署；正式启用前必须把 `/etc/joysong/deploy.env` 中的 `RELEASE_URL_HOST` 替换为真实私有 Bucket 主机名，并完成 OIDC、最小权限和不可覆盖上传验证。
+
 ### 6.4 ECS 与 Cloud Assistant
 
-先确认目标 ECS 上 Cloud Assistant Agent 在线且版本支持指定运行用户。随后按[部署资产索引](../../../joysong-server/deploy/README.md)安装 root-owned dispatcher、`joysong-deploy` 用户、sudoers、systemd 和 Nginx 模板。Cloud Assistant 只能以 `joysong-deploy` 调用固定 dispatcher；不能传任意 root shell，也不能读取 `/etc/joysong/<env>/joysong.env`。
+先确认目标 ECS 上 Cloud Assistant Agent 在线且版本支持指定运行用户。随后按[部署资产索引](../../../joysong-server/deploy/README.md)安装 root-owned dispatcher、`joysong-deploy` 用户、sudoers 和 systemd，并把 Nginx 模板准备在活动配置目录之外。Cloud Assistant 只能以 `joysong-deploy` 调用固定 dispatcher；不能传任意 root shell，也不能读取 `/etc/joysong/<env>/joysong.env`。
+
+主机部署脚本必须兼容现有 Python 3.6 和不支持 `systemctl --value` 的旧 systemd。修改脚本时不得引入 Python 3.7+ 专属语法/API，也不得依赖新版本 systemd 才提供的输出参数；除非先把主机升级作为独立变更完成并重新核验全部脚本。
 
 首次 UAT 接入顺序固定为：完成本节配置 -> 创建并核验 root-only 备份 -> bootstrap -> 填写并验证 UAT 环境文件 -> 捕获现有 Demo 基线 -> 解决 ICP/DNS/TLS -> 明确 Go/No-Go -> 最终切流。自动 tag 发布只有在 `BASELINE_CAPTURED` 和 `CUTOVER_COMPLETED` 两个门禁都存在且匹配时才允许执行。
+
+其中“创建备份、bootstrap、环境文件和 baseline 捕获”均属于预备阶段：现有 Demo 继续作为唯一在线写实例，禁止启动或启用 `joysong@uat`，禁止执行 Flyway、Demo `Apply`，也禁止安装活动 Nginx 配置或 reload/restart Nginx。
 
 ## 7. Pull Request 质量门禁
 
@@ -248,6 +254,8 @@ manifest 至少包含：
 }
 ```
 
+正常 CI 构建的后端与 Admin 必须来自同一次检出，manifest 的 `commit` 始终是单一完整 `GITHUB_SHA`。只有把既有手工部署捕获为历史 baseline 时允许双来源 provenance：操作者分别提供完整 server commit 与完整 admin commit，捕获脚本校验 JAR release 目录和 Admin release 目录各自携带对应 commit 的 SHA8，并把两者写入 `baselineSourceCommits` 及 root-only `BASELINE_CAPTURED`。该兼容字段不得用于放宽后续 CI 发布的单提交约束。
+
 禁止把 `.env`、`application-dev.yml`、数据库导出、keystore、私钥、Token 或服务端密钥打入发布制品。
 
 Critical/High 漏洞和 secret 扫描命中均阻断；当前流程不实现自动例外白名单。如确需接受风险，必须先通过单独安全评审变更门禁代码，不能在某次发布中临时跳过扫描。
@@ -285,9 +293,13 @@ Critical/High 漏洞和 secret 扫描命中均阻断；当前流程不实现自�
 
 - 不重装 ECS，不清空数据库，不覆盖当前版本目录。
 - 先绑定并记录旧 systemd unit、MainPID、8080 listener、实际 JAR 路径及 SHA-256、环境文件、数据根、Nginx 配置和数据库身份；最终切流前逐项复核，任一漂移都在停写/同步前失败。
+- 分别确认旧 Server 与旧 Admin 制品的完整 40 位 Git commit；baseline 会把两条来源作为历史 provenance 记录，并分别用对应 SHA8 校验解析后的 JAR release 目录和 Admin release 目录，不能用一个猜测值代替另一来源。
+- 旧 Demo 环境文件只保留实测的两条 ASCII 裸行兼容例外：每条 ignored line 必须按脚本内精确的“上一赋值键 + 裸行 SHA-256” allowlist 匹配，且各自只能出现一次。未知摘要、位置错误、重复出现或新 UAT 环境文件中的任何裸行一律 fail-closed。脚本只记录 ignored line 的 count 与摘要，不输出原文；旧原文件仍以 root-only 方式完整备份并纳入校验和。
 - 在任何服务切换前创建应用级可回滚备份；云快照如产生费用，必须先取得批准。
-- 新 UAT 在独立目录完成验证后再切换入口。
-- Baseline 只短暂启动新 UAT 做本机身份/健康检查，成功后立即停止并禁用；最终切流冻结旧服务前，不能让旧 Demo 与新 UAT 同时作为完整写实例运行。
+- Baseline 是完全离线的新 UAT 捕获：只在独立目录校验配置、身份、备份、制品和持久数据副本；现有 Demo 继续承担唯一在线写入，`joysong@uat` 始终停止且禁用，`8081` 不得出现新监听。
+- Baseline 不执行 Flyway、Demo `Apply` 或应用健康检查，也不安装、reload 或 restart Nginx。只有经明确 Go/No-Go 批准的 final cutover 才冻结旧写入、启动并验证 `127.0.0.1:8081`，随后原子替换并 reload Nginx。
+- Baseline 备份中的 `data/**` 必须生成 root-only `DATA_MANIFEST.jsonl`：路径按原始字节排序并以 Base64 记录，覆盖数据根、目录和普通文件的类型、mode、uid、gid，以及普通文件的 size/SHA-256。发现链接、特殊文件、跨设备条目或多硬链文件即拒绝；生成后重新扫描并逐项比对，防止捕获过程中漂移。该清单与 service、Nginx、data-migration 审计文件一并纳入备份根 `SHA256SUMS`。
+- 因旧 Demo 在 baseline 期间仍可写入，这份数据副本只是迁移 seed，不是最终权威快照。只有 final cutover 冻结旧写入后完成最终 delta 并通过源/目标双向完整树哈希，目标数据才可视为权威。
 
 ### 10.2 目标目录
 
@@ -329,8 +341,8 @@ Prod 使用同结构的 `/opt/joysong/prod`、`/etc/joysong/prod` 和 `/var/lib/
 
 - 当前本机 MySQL 可继续用于 UAT，不得描述为生产架构。
 - 数据库必须以 `myapp_worktree_` 开头，并使用 UAT 独立账号。
-- 首次基线执行 Flyway 后，只人工执行一次 Demo `Apply`，随后执行 `Verify`。
-- 日常发布只自动执行 `Verify`，不得每次启动重新 Apply。
+- Baseline 不启动应用，因此不执行 Flyway、Demo `Apply` 或 Demo `Verify`；它只核对旧服务与新配置引用同一安全前缀数据库，并生成、绑定可校验备份。
+- Final cutover 启动新服务时按 migration digest 与恢复演练门禁处理数据库迁移，Demo action 只能是 `Verify`，不得对当前 UAT 库执行 `Apply`。只有另行批准的新建隔离数据库初始化流程可以人工执行一次 `Apply`，随后立即执行 `Verify`。
 - UAT 强制 `app.scheduling.enabled=false`；除停用定时任务外，候选启动也跳过中断上传恢复，防止验证阶段删除本地/OSS 对象或写回媒体状态。
 - 只允许虚构机构、医生、顾问、项目和测试账号。
 - 需要重置时创建新安全前缀数据库，执行 migrate -> Apply -> Verify 后切换；不得 truncate/drop 当前库。
@@ -396,10 +408,10 @@ iOS 本期只有无签名编译证据，不属于交付物。
 3. 在 ECS 安全组及主机防火墙开放 TCP 443；保留 TCP 80 仅用于 ACME HTTP-01 和 HTTPS 跳转。
 4. 申请或导入覆盖当前三个 SAN 的证书。未来两个 UAT 子域名必须也被目标证书覆盖，或使用独立证书。私钥不得进入 Git、GitHub Actions 日志或 Release。
 5. 将完整证书链和私钥分别安装到 `/etc/nginx/tls/joyingsong.net.pem`、`/etc/nginx/tls/joyingsong.net.key`，属主为 root，权限分别为 `0644`、`0600`。
-6. 安装全机唯一的 default-deny server 和对应 UAT Nginx 模板，执行 `nginx -t` 成功后才 reload。当前主域名模板与未来 UAT 子域名模板都在 `joysong-server/deploy/nginx/`。
+6. 只把全机唯一的 default-deny server 和对应 UAT Nginx 模板暂存到活动 include 目录之外并完成人工审查，不安装、不 reload/restart。当前主域名模板与未来 UAT 子域名模板都在 `joysong-server/deploy/nginx/`。
 7. 用 `openssl x509 -in /etc/nginx/tls/joyingsong.net.pem -noout -dates -ext subjectAltName` 核对有效期与 SAN；再从 ECS 外部使用真实 DNS/SNI 验证证书链、跳转、API 健康和 Admin 深层路由。仅在本机用 `--resolve ...:127.0.0.1` 不能证明公网可达。
 8. ACME 自动续期必须有 deploy hook，把更新后的 fullchain/key 同步到上述固定路径，重新设置权限，先 `nginx -t` 再 reload；同时设置证书到期告警。
-9. 在最终切流前人工记录 Go/No-Go。切流维护窗口覆盖旧服务停写、最终数据库/配置备份、持久数据 delta、健康验证和 Nginx 原子替换；任一步失败都按脚本审计结果回退或保持维护态。
+9. 在最终切流前人工记录 Go/No-Go。只有进入获批的切流维护窗口后，才允许安装所需 Nginx 辅助配置并执行 `nginx -t`；切流事务覆盖旧服务停写、最终数据库/配置备份、持久数据 delta、启动并验证 `127.0.0.1:8081`、Nginx 原子替换和 reload。任一步失败都按脚本审计结果回退或保持维护态。
 
 ## 14. 自动与人工验收
 
@@ -438,7 +450,7 @@ iOS 本期只有无签名编译证据，不属于交付物。
 ### 15.2 数据恢复
 
 - 备份必须包含环境配置、当前/上一版制品、Nginx、uploads/private/staging 和数据库；备份清单及 SHA-256 只能证明完整性，不能代替恢复演练。
-- MySQL dump 只导出库内对象和数据，禁止携带 `CREATE DATABASE` 或 `USE`，避免误覆盖原库；凭据只从 root-only MySQL client 配置读取。
+- 在线 MySQL 逻辑备份只允许在全部基础表均为 InnoDB、且备份前后该库 scheduled EVENT 数量均为 `0` 时执行；否则 fail-closed。dump 故意不导出 EVENT，并且不得携带 `CREATE DATABASE` 或 `USE`，避免恢复时创建、切换或异步改写数据库；凭据只从 root-only MySQL client 配置读取。
 - UAT 只恢复到一个新建、空白且名称以 `myapp_worktree_` 开头的数据库。先打印并人工确认 host/name，再导入、执行 Flyway validate、Demo Verify、登录和关键只读检查，最后修改环境文件并切换。
 - Prod 恢复到新的 RDS/数据库，验证登录、只读数据和关键交易状态后切换；不得在原实例上直接覆盖恢复。
 - 原数据库保留到观察期结束，未经单独审批不得 drop、reset 或删除。应用回滚不自动执行逆向 SQL。

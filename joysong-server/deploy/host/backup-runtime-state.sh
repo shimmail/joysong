@@ -126,7 +126,7 @@ from urllib.parse import urlsplit
 value = sys.argv[1]
 if not value.startswith("jdbc:mysql://"):
     raise SystemExit("unsupported database URL")
-parsed = urlsplit("mysql://" + value.removeprefix("jdbc:mysql://"))
+parsed = urlsplit("mysql://" + value[len("jdbc:mysql://"):])
 if not parsed.hostname or not parsed.path.lstrip("/"):
     raise SystemExit("database host or name is missing")
 print(parsed.hostname)
@@ -150,19 +150,55 @@ PY
   printf 'Backup capacity: available=%s required=%s estimated_database=%s\n' \
     "$available_bytes" "$required_bytes" "$database_size"
   ((available_bytes > required_bytes)) || { printf 'insufficient disk capacity for verified database backup\n' >&2; exit 2; }
+  database_engines="$(mysql --defaults-extra-file="$mysql_client_config" \
+    --protocol=TCP --host="$database_host" --port="$database_port" \
+    --batch --skip-column-names \
+    --execute="SELECT COALESCE(engine, 'NULL'), COUNT(*) FROM information_schema.tables WHERE table_schema = '${database_name}' AND table_type = 'BASE TABLE' GROUP BY engine ORDER BY engine")"
+  while IFS=$'\t' read -r database_engine table_count; do
+    [[ -z "$database_engine" ]] && continue
+    [[ "$database_engine" == "InnoDB" && "$table_count" =~ ^[0-9]+$ ]] || {
+      printf 'online logical backup requires every base table to use InnoDB\n' >&2
+      exit 2
+    }
+  done <<<"$database_engines"
+  database_events_before="$(mysql --defaults-extra-file="$mysql_client_config" \
+    --protocol=TCP --host="$database_host" --port="$database_port" \
+    --batch --skip-column-names \
+    --execute="SELECT COUNT(*) FROM information_schema.events WHERE event_schema = '${database_name}'")"
+  [[ "$database_events_before" == "0" ]] || {
+    printf 'online logical backup requires the source database to contain no scheduled events\n' >&2
+    exit 2
+  }
   create_persistent_archive
   mysqldump --defaults-extra-file="$mysql_client_config" \
     --protocol=TCP \
     --host="$database_host" \
     --port="$database_port" \
     --single-transaction \
+    --quick \
     --routines \
     --triggers \
     --hex-blob \
+    --set-gtid-purged=OFF \
+    --no-tablespaces \
+    --no-create-db \
     "$database_name" |
     gzip -9 >"$backup_root/database.sql.gz"
   gzip -t "$backup_root/database.sql.gz"
   [[ -s "$backup_root/database.sql.gz" ]] || { printf 'database backup is empty\n' >&2; exit 1; }
+  if gzip -cd "$backup_root/database.sql.gz" |
+      grep -Ei '^[[:space:]]*(CREATE[[:space:]]+DATABASE|USE[[:space:]])' >/dev/null; then
+    printf 'database backup unexpectedly contains CREATE DATABASE or USE\n' >&2
+    exit 2
+  fi
+  database_events_after="$(mysql --defaults-extra-file="$mysql_client_config" \
+    --protocol=TCP --host="$database_host" --port="$database_port" \
+    --batch --skip-column-names \
+    --execute="SELECT COUNT(*) FROM information_schema.events WHERE event_schema = '${database_name}'")"
+  [[ "$database_events_after" == "0" ]] || {
+    printf 'source database scheduled events changed during backup\n' >&2
+    exit 2
+  }
   database_dump_sha="$(sha256sum "$backup_root/database.sql.gz" | awk '{ print $1 }')"
 fi
 

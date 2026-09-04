@@ -79,8 +79,7 @@ share_base_url="$(require_value APP_SHARE_BASE_URL)"
 cors_allowed_origins="$(require_value CORS_ALLOWED_ORIGINS)"
 [[ "$address" == "127.0.0.1" ]] || fail "SERVER_ADDRESS must be 127.0.0.1"
 
-python3 - "$server_base_url" "$share_base_url" "$cors_allowed_origins" <<'PY' ||
-  fail "SERVER_BASE_URL, APP_SHARE_BASE_URL or CORS_ALLOWED_ORIGINS is unsafe"
+if ! python3 - "$server_base_url" "$share_base_url" "$cors_allowed_origins" <<'PY'
 import sys
 from urllib.parse import urlsplit
 
@@ -111,6 +110,9 @@ if not origins or any(not item for item in origins):
 for origin in origins:
     parse_https(origin, origin_only=True)
 PY
+then
+  fail "SERVER_BASE_URL, APP_SHARE_BASE_URL or CORS_ALLOWED_ORIGINS is unsafe"
+fi
 
 if [[ -n "$expected_server_base_url" || -n "$expected_admin_origin" ]]; then
   [[ -n "$expected_server_base_url" && -n "$expected_admin_origin" ]] ||

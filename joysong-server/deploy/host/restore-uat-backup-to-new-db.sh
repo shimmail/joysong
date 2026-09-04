@@ -112,7 +112,7 @@ from urllib.parse import urlsplit
 value = sys.argv[1]
 if not value.startswith("jdbc:mysql://"):
     raise SystemExit("unsupported database URL")
-parsed = urlsplit("mysql://" + value.removeprefix("jdbc:mysql://"))
+parsed = urlsplit("mysql://" + value[len("jdbc:mysql://"):])
 source = parsed.path.lstrip("/")
 if not parsed.hostname or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", source):
     raise SystemExit("database host or source name is invalid")

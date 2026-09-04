@@ -11,6 +11,14 @@ fail() {
   exit 2
 }
 
+systemctl_property_value() {
+  local unit="$1" property="$2" line
+  line="$(systemctl show -p "$property" "$unit" 2>/dev/null || true)"
+  line="${line%%$'\n'*}"
+  [[ "$line" == "${property}="* ]] || return 0
+  printf '%s' "${line#*=}"
+}
+
 validate_environment_and_tag() {
   local environment="$1" tag="$2"
   [[ "$environment" == "uat" || "$environment" == "prod" ]] || fail "unsupported environment"
@@ -238,6 +246,21 @@ allowed_origins = (
 )
 if (api_url, admin_url) not in allowed_origins:
     raise SystemExit("release API/Admin origin pair is invalid")
+baseline_source_commits = data.get("baselineSourceCommits")
+if tag == "v0.0.0-uat.0":
+    if not isinstance(baseline_source_commits, dict) or set(baseline_source_commits) != {"server", "admin"}:
+        raise SystemExit("baseline manifest source commits are missing or malformed")
+    if any(
+        not isinstance(value, str)
+        or len(value) != 40
+        or any(character not in "0123456789abcdef" for character in value)
+        for value in baseline_source_commits.values()
+    ):
+        raise SystemExit("baseline manifest source commit is invalid")
+    if baseline_source_commits["server"] != commit:
+        raise SystemExit("baseline server source commit does not match manifest commit")
+elif "baselineSourceCommits" in data:
+    raise SystemExit("baseline source commits are forbidden for a regular release")
 artifacts = data.get("artifacts")
 if not isinstance(artifacts, list):
     raise SystemExit("manifest artifacts must be a list")
@@ -291,6 +314,11 @@ for key, value in {
 }.items():
     if release_identity.get(key) != value:
         raise SystemExit(f"release identity {key} mismatch")
+if tag == "v0.0.0-uat.0":
+    if release_identity.get("baselineSourceCommits") != baseline_source_commits:
+        raise SystemExit("baseline source commits differ between manifest and release identity")
+elif "baselineSourceCommits" in release_identity:
+    raise SystemExit("regular release identity contains baseline source commits")
 
 def tree_digest(root: pathlib.Path) -> str:
     value = hashlib.sha256()
@@ -364,7 +392,7 @@ wait_for_service_health() {
   local environment="$1" port="$2" attempt pid cmdline resolved_jar
   for ((attempt = 1; attempt <= HEALTH_RETRIES; attempt++)); do
     if systemctl is-active --quiet "joysong@${environment}.service"; then
-      pid="$(systemctl show --property MainPID --value "joysong@${environment}.service" 2>/dev/null || true)"
+      pid="$(systemctl_property_value "joysong@${environment}.service" MainPID)"
       resolved_jar="$(readlink -f "/opt/joysong/$environment/current/server.jar" 2>/dev/null || true)"
       if [[ "$pid" =~ ^[1-9][0-9]*$ && "$pid" != "1" && -r "/proc/$pid/cmdline" && -n "$resolved_jar" ]]; then
         cmdline="$(tr '\0' '\n' <"/proc/$pid/cmdline" 2>/dev/null || true)"
