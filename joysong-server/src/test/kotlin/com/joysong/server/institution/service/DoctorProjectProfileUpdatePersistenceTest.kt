@@ -1,6 +1,7 @@
 package com.joysong.server.institution.service
 
 import com.joysong.server.config.OrderSplitProperties
+import com.joysong.server.config.TravelGroundServicePricingProperties
 import com.joysong.server.support.WorktreeTestDatabase
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
@@ -9,6 +10,7 @@ import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.TravelGroundServicePricing
+import com.joysong.server.order.service.TravelGroundServiceFeeRatePolicy
 import com.joysong.server.project.service.InstitutionProjectPayloadPolicy
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -68,7 +70,7 @@ class DoctorProjectProfileUpdatePersistenceTest {
     @Test
     @Order(1)
     fun `fresh migrations and approval atomically update only target doctor`() {
-        assertEquals(listOf("33"), jdbc.queryForList(
+        assertEquals(listOf("33", "34", "35", "36", "37", "38", "39", "40"), jdbc.queryForList(
             "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank",
             String::class.java
         ))
@@ -152,6 +154,11 @@ class DoctorProjectProfileUpdatePersistenceTest {
 class ProfileUpdatePersistenceTestConfig {
     @Bean fun objectMapper(): ObjectMapper = jacksonObjectMapper()
     @Bean fun cacheManager(): CacheManager = ConcurrentMapCacheManager("discover", "home", "projects")
+    @Bean fun travelGroundServicePricingProperties(): TravelGroundServicePricingProperties =
+        TravelGroundServicePricingProperties()
+    @Bean fun travelGroundServiceFeeRatePolicy(
+        properties: TravelGroundServicePricingProperties
+    ): TravelGroundServiceFeeRatePolicy = TravelGroundServiceFeeRatePolicy(properties)
 }
 
 class DoctorProjectProfileUpdateMySqlContainer(imageName: String) : MySQLContainer<DoctorProjectProfileUpdateMySqlContainer>(imageName) {

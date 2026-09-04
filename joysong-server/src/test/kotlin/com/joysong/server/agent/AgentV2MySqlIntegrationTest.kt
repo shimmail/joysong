@@ -11,6 +11,7 @@ import com.joysong.server.agent.orchestration.BeginTurnResult
 import com.joysong.server.agent.orchestration.CompleteTurnCommand
 import com.joysong.server.agent.orchestration.TurnLifecycleService
 import com.joysong.server.agent.repository.AgentTurnRepository
+import com.joysong.server.agent.service.ComparisonRequestBuilder
 import com.joysong.server.chat.entity.ChatSessionEntity
 import com.joysong.server.chat.repository.ChatSessionRepository
 import org.flywaydb.core.Flyway
@@ -63,7 +64,12 @@ import java.util.UUID
 )
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-@Import(TurnLifecycleService::class, AgentContextBuilder::class, AgentLifecycleTestConfig::class)
+@Import(
+    TurnLifecycleService::class,
+    AgentContextBuilder::class,
+    ComparisonRequestBuilder::class,
+    AgentLifecycleTestConfig::class
+)
 class AgentV2MySqlIntegrationTest {
 
     @Autowired
@@ -94,7 +100,7 @@ class AgentV2MySqlIntegrationTest {
             "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank",
             String::class.java
         )
-        assertEquals((1..15).map(Int::toString), history)
+        assertEquals(listOf("33", "34", "35", "36", "37", "38", "39", "40"), history)
 
         assertEquals(1, leaseColumnCount(jdbcTemplate))
 

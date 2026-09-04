@@ -56,6 +56,41 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}/joysong-server/gradle/wrapper/gradle-wrapper.properties
+      - name: Test and package backend
+        working-directory: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}/joysong-server
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          chmod +x gradlew
+          ./gradlew test bootJar --no-daemon
+
+  backend-mysql:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - name: agent-demo
+            filters: '--tests com.joysong.server.agent.* --tests com.joysong.server.demo.*'
+          - name: professional
+            filters: '--tests com.joysong.server.doctor.* --tests com.joysong.server.identity.* --tests com.joysong.server.institution.*'
+          - name: platform
+            filters: '--tests com.joysong.server.legal.* --tests com.joysong.server.migration.* --tests com.joysong.server.notification.* --tests com.joysong.server.payment.* --tests com.joysong.server.project.* --tests com.joysong.server.reconciliation.* --tests com.joysong.server.user.*'
+    name: Backend MySQL (${{ matrix.shard.name }})
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -69,6 +104,8 @@ jobs:
       - name: Test backend on isolated MySQL
         working-directory: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}/joysong-server
         shell: bash
+        env:
+          TEST_FILTERS: ${{ matrix.shard.filters }}
         run: |
           set -Eeuo pipefail
           repository_root="$(git rev-parse --show-toplevel)"
@@ -77,8 +114,9 @@ jobs:
           database_name="myapp_${worktree_id}"
           echo "Migration/test database host: Testcontainers isolated MySQL"
           echo "Migration/test database name: $database_name"
+          read -r -a test_filters <<<"$TEST_FILTERS"
           chmod +x gradlew
-          ./gradlew test mysqlIntegrationTest bootJar --no-daemon
+          ./gradlew mysqlIntegrationTest "${test_filters[@]}" --no-daemon
 
   admin:
     needs: changes
@@ -211,7 +249,7 @@ jobs:
   quality-gates:
     name: Required quality gates
     if: always()
-    needs: [changes, backend, admin, flutter, ios-unsigned, infrastructure]
+    needs: [changes, backend, backend-mysql, admin, flutter, ios-unsigned, infrastructure]
     runs-on: ubuntu-latest
     steps:
       - name: Require every selected check to pass

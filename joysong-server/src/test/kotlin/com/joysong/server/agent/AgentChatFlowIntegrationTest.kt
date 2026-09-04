@@ -150,6 +150,12 @@ class AgentChatFlowIntegrationTest {
 
     @BeforeEach
     fun installTransactionObserver() {
+        userRepository.saveAllAndFlush(
+            listOf(
+                UserEntity(id = "user-1", passwordHash = "test-password-hash", nickname = "测试用户一"),
+                UserEntity(id = "user-2", passwordHash = "test-password-hash", nickname = "测试用户二")
+            )
+        )
         fakeLlmCalls.set(0)
         fakeLlmStatus.set(200)
         fakeLlmDelayMs.set(0)
