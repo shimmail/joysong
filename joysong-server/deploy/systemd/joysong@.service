@@ -1,0 +1,34 @@
+[Unit]
+Description=JoySong backend (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=joysong-%i
+Group=joysong-%i
+WorkingDirectory=/var/lib/joysong/%i
+EnvironmentFile=/etc/joysong/%i/joysong.env
+UnsetEnvironment=JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS JAVA_OPTS LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT
+ExecStartPre=+/usr/local/lib/joysong/deploy-release.sh validate-start %i
+ExecStart=/usr/bin/java -XX:+ExitOnOutOfMemoryError -jar /opt/joysong/%i/current/server.jar
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=180s
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/joysong/%i
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

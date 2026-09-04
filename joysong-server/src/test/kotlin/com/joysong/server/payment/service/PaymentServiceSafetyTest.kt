@@ -4,8 +4,10 @@ import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.payment.domain.PaymentProvider
+import com.joysong.server.payment.domain.PaymentStatus
 import com.joysong.server.payment.domain.PaymentType
 import com.joysong.server.payment.entity.PaymentEntity
+import com.joysong.server.payment.provider.PaymentGateway
 import com.joysong.server.payment.provider.PaymentGatewayRegistry
 import com.joysong.server.payment.provider.PaymentProviderException
 import com.joysong.server.payment.repository.PaymentRepository
@@ -13,8 +15,10 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
+import org.springframework.mock.env.MockEnvironment
 import java.math.BigDecimal
 import java.util.Optional
 
@@ -97,4 +101,74 @@ class PaymentServiceSafetyTest {
         verify(exactly = 0) { payments.save(any<PaymentEntity>()) }
         verify(exactly = 0) { payments.saveAndFlush(any<PaymentEntity>()) }
     }
+
+    @Test
+    fun `demo simulator rejects a non-travel payment before local attempt creation`() {
+        val persistence = mockk<PaymentPersistenceService>()
+        val gateway = mockk<PaymentGateway> {
+            every { provider } returns PaymentProvider.ALIPAY_PLUS
+        }
+        val service = PaymentService(
+            paymentRepository = mockk(relaxed = true),
+            orderRepository = mockk(relaxed = true),
+            orderStatusLogService = mockk(relaxed = true),
+            paymentGatewayRegistry = PaymentGatewayRegistry(listOf(gateway)),
+            paymentPersistenceService = persistence,
+            demoPaymentPolicy = paymentPolicy("demo", simulatedEnabled = true),
+        )
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.createPaymentSession(
+                "order-1",
+                "user-1",
+                PaymentType.CONSULTATION_FEE,
+                PaymentProvider.ALIPAY_PLUS,
+                "ALIPAY_PLUS_CASHIER",
+                "idem-key-123",
+            )
+        }
+
+        assertEquals("UAT_SIMULATED_PAYMENT_TYPE_NOT_SUPPORTED", error.message)
+        verify(exactly = 0) { persistence.prepareAttempt(any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { gateway.createPayment(any()) }
+    }
+
+    @Test
+    fun `development simulator preserves the legacy consultation payment orchestration`() {
+        val prepared = mockk<PaymentEntity> {
+            every { status } returns PaymentStatus.SUCCEEDED.name
+        }
+        val persistence = mockk<PaymentPersistenceService> {
+            every { prepareAttempt(any(), any(), any(), any(), any(), any()) } returns prepared
+        }
+        val gateway = mockk<PaymentGateway> {
+            every { provider } returns PaymentProvider.ALIPAY_PLUS
+        }
+        val service = PaymentService(
+            paymentRepository = mockk(relaxed = true),
+            orderRepository = mockk(relaxed = true),
+            orderStatusLogService = mockk(relaxed = true),
+            paymentGatewayRegistry = PaymentGatewayRegistry(listOf(gateway)),
+            paymentPersistenceService = persistence,
+            demoPaymentPolicy = paymentPolicy("dev", simulatedEnabled = true),
+        )
+
+        val result = service.createPaymentSession(
+            "order-1",
+            "user-1",
+            PaymentType.CONSULTATION_FEE,
+            PaymentProvider.ALIPAY_PLUS,
+            "ALIPAY_PLUS_CASHIER",
+            "idem-key-123",
+        )
+
+        assertSame(prepared, result.payment)
+        verify(exactly = 1) { persistence.prepareAttempt(any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { gateway.createPayment(any()) }
+    }
+
+    private fun paymentPolicy(profile: String, simulatedEnabled: Boolean) = DemoPaymentPolicy(
+        MockEnvironment().apply { setActiveProfiles(profile) },
+        simulatedEnabled,
+    )
 }

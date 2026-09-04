@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly RELEASE_SCRIPT=/usr/local/lib/joysong/deploy-release.sh
+
+[[ -x "$RELEASE_SCRIPT" ]] || {
+  printf 'release dispatcher is not installed correctly\n' >&2
+  exit 2
+}
+
+case "${1:-}" in
+  deploy|rollback|rollback-previous|recover-public-failure|verify-uat-isolation|preflight) exec "$RELEASE_SCRIPT" "$@" ;;
+  *)
+    printf 'unsupported dispatcher operation\n' >&2
+    exit 2
+    ;;
+esac

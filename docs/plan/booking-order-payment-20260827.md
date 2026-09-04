@@ -100,7 +100,7 @@
 **Files:**
 
 - Modify: `design/TRAVEL_GROUND_SERVICE_PAYMENT_WORKFLOW.puml`
-- Modify: `docs/支付开发与云服务器部署指南.md`
+- Deployment/configuration impact is maintained in `docs/guide/deployment/README.md` and `docs/guide/deployment/CONFIGURATION_REFERENCE.md`; this historical plan does not define the current deployment procedure.
 - Modify: `docs/FLUTTER_API_CONTRACT.md`
 
 - [ ] Update UML to show the separate service-fee policy, immutable revision snapshot, post-commit dev auto-pay branch, canonical re-read, and failure fallback to `PENDING_SERVICE_FEE`.

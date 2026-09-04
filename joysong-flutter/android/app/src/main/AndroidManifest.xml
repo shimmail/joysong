@@ -7,7 +7,14 @@
         android:label="娇颜颂"
         android:name="${applicationName}"
         android:supportsRtl="true"
-        android:theme="@style/NormalTheme">
+        android:theme="@style/NormalTheme"
+        android:usesCleartextTraffic="${usesCleartextTraffic}">
+        <meta-data
+            android:name="com.joysong.app.APP_ENV"
+            android:value="${appEnvironment}" />
+        <meta-data
+            android:name="com.joysong.app.API_BASE_URL"
+            android:value="${apiBaseUrl}" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -29,7 +36,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
-                    android:scheme="joysong"
+                    android:scheme="${deepLinkScheme}"
                     android:host="s"
                     android:pathPrefix="/diary" />
             </intent-filter>

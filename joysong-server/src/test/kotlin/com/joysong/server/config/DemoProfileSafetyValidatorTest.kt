@@ -9,9 +9,10 @@ import org.springframework.mock.env.MockEnvironment
 class DemoProfileSafetyValidatorTest {
 
     @Test
-    fun `demo profile permits explicitly enabled OSS`() {
+    fun `demo profile permits public OSS and the explicit payment simulator`() {
         val environment = safeDemoEnvironment()
             .withProperty("oss.enabled", "true")
+            .withProperty("payment.alipay-plus.simulated-enabled", "true")
 
         assertDoesNotThrow {
             DemoProfileSafetyValidator().validate(environment)
@@ -28,6 +29,23 @@ class DemoProfileSafetyValidatorTest {
         }
 
         assertTrue(error.message.orEmpty().contains("aliyun.sms.enabled must be false"))
+    }
+
+    @Test
+    fun `demo profile rejects order auto payment even when the simulator is enabled`() {
+        val environment = safeDemoEnvironment()
+            .withProperty("payment.alipay-plus.simulated-enabled", "true")
+            .withProperty("payment.alipay-plus.auto-pay-on-order-create-enabled", "true")
+
+        val error = assertThrows(IllegalStateException::class.java) {
+            DemoProfileSafetyValidator().validate(environment)
+        }
+
+        assertTrue(
+            error.message.orEmpty().contains(
+                "payment.alipay-plus.auto-pay-on-order-create-enabled must be false"
+            )
+        )
     }
 
     private fun safeDemoEnvironment() = MockEnvironment().apply {

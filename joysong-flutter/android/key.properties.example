@@ -1,6 +1,0 @@
-# Copy this file to android/key.properties on the release build machine.
-# Never commit key.properties or the keystore itself.
-storeFile=D:\\secure\\joysong-release.jks
-storePassword=replace-me
-keyAlias=joysong
-keyPassword=replace-me

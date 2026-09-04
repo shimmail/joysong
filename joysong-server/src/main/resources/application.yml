@@ -80,7 +80,9 @@ security:
     log-for-dev: false
 
 google:
-  client-id: ${GOOGLE_CLIENT_ID}
+  # Demo/UAT may leave this blank because Google sign-in is not exposed there.
+  # ConfigValidator still requires it for every other profile.
+  client-id: ${GOOGLE_CLIENT_ID:}
   # 仅用于 Google ID Token 校验访问 Google 公钥；留空时直连，不影响其他 HTTP 请求。
   # 示例：http://127.0.0.1:7890 或 http://proxy.example.internal:8080
   proxy-url: ${GOOGLE_PROXY_URL:}
@@ -132,9 +134,9 @@ aliyun:
 
 payment:
   alipay-plus:
-    # Requires the dev profile and simulated gateway as independent safety gates.
+    # Automatic payment remains development-only and is rejected by demo/prod safety gates.
     auto-pay-on-order-create-enabled: ${ALIPAY_PLUS_AUTO_PAY_ON_ORDER_CREATE_ENABLED:false}
-    # Development-only simulated gateway. The prod profile overrides this to false.
+    # Explicit opt-in for the non-production simulated gateway. Production rejects it at startup.
     simulated-enabled: ${ALIPAY_PLUS_SIMULATED_ENABLED:false}
   stripe:
     # Legacy-only adapter for historical Stripe query/refund liabilities. New payments never use it.

@@ -36,6 +36,10 @@ class ConfigValidator(
     @Value("\${app.share-base-url:}") private val shareBaseUrl: String,
     @Value("\${app.share-request-origin-fallback-enabled:false}")
     private val shareRequestOriginFallbackEnabled: Boolean,
+    @Value("\${payment.alipay-plus.simulated-enabled:false}")
+    private val alipayPlusSimulatedEnabled: Boolean,
+    @Value("\${payment.alipay-plus.auto-pay-on-order-create-enabled:false}")
+    private val alipayPlusAutoPayOnOrderCreateEnabled: Boolean,
 ) {
     private val logger = LoggerFactory.getLogger(ConfigValidator::class.java)
 
@@ -44,11 +48,27 @@ class ConfigValidator(
         val missing = mutableListOf<String>()
         val isProduction = environment.activeProfiles.any { it.equals("prod", ignoreCase = true) }
         val isDevelopment = environment.activeProfiles.any { it.equals("dev", ignoreCase = true) }
+        val isDemo = environment.activeProfiles.any { it.equals("demo", ignoreCase = true) }
         val normalizedOssBucketName = ossBucketName.trim()
         val normalizedPrivateBucketName = ossPrivateBucketName.trim()
 
+        if (isProduction) {
+            val unsafePaymentSettings = buildList {
+                if (alipayPlusSimulatedEnabled) add("payment.alipay-plus.simulated-enabled")
+                if (alipayPlusAutoPayOnOrderCreateEnabled) {
+                    add("payment.alipay-plus.auto-pay-on-order-create-enabled")
+                }
+            }
+            if (unsafePaymentSettings.isNotEmpty()) {
+                val message = "Unsafe production payment configuration: " +
+                    unsafePaymentSettings.joinToString(", ") { "$it must be false" }
+                logger.error(message)
+                throw IllegalStateException(message)
+            }
+        }
+
         if (jwtSecret.length < 32) missing.add("JWT_SECRET (at least 32 characters)")
-        if (googleClientId.isBlank()) missing.add("GOOGLE_CLIENT_ID")
+        if (!isDemo && googleClientId.isBlank()) missing.add("GOOGLE_CLIENT_ID")
         if (ossEnabled) {
             if (ossEndpoint.isBlank()) missing.add("OSS_ENDPOINT")
             if (normalizedOssBucketName.isBlank()) missing.add("OSS_BUCKET_NAME")

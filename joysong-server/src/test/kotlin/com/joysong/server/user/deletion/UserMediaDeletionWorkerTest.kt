@@ -34,6 +34,7 @@ class UserMediaDeletionWorkerTest {
             privateOssBucketName = "",
             ossClientProvider = mockk<ObjectProvider<OSS>>(relaxed = true),
             metrics = mockk<AccountDeletionMetrics>(relaxed = true),
+            schedulingEnabled = true,
         )
     }
 
@@ -136,7 +137,25 @@ class UserMediaDeletionWorkerTest {
         assertEquals("DELETED", fixture.deleteStatus())
     }
 
-    private fun pendingPrivateOssAsset(oss: OSS): PrivateOssDeletionFixture {
+    @Test
+    fun `application startup leaves interrupted uploads untouched when scheduling is disabled`() {
+        val oss = mockk<OSS>(relaxed = true)
+        val fixture = pendingPrivateOssAsset(oss, schedulingEnabled = false)
+        fixture.jdbc.update(
+            "UPDATE user_media_assets SET delete_status = 'UPLOAD_PENDING' WHERE id = 'asset-1'",
+        )
+
+        fixture.worker.recoverInterruptedUploads()
+
+        verify(exactly = 0) { oss.deleteObject(any<String>(), any<String>()) }
+        assertEquals("UPLOAD_PENDING", fixture.deleteStatus())
+        assertEquals(0, fixture.deleteAttempts())
+    }
+
+    private fun pendingPrivateOssAsset(
+        oss: OSS,
+        schedulingEnabled: Boolean = true,
+    ): PrivateOssDeletionFixture {
         val dataSource = DriverManagerDataSource(
             "jdbc:h2:mem:private_media_delete_${UUID.randomUUID()};MODE=MySQL;DB_CLOSE_DELAY=-1",
             "sa",
@@ -178,6 +197,7 @@ class UserMediaDeletionWorkerTest {
             privateOssBucketName = " $PRIVATE_BUCKET ",
             ossClientProvider = ossProvider,
             metrics = mockk(relaxed = true),
+            schedulingEnabled = schedulingEnabled,
         )
         return PrivateOssDeletionFixture(jdbc, privateWorker)
     }

@@ -109,7 +109,6 @@ class DemoDatabaseSafetyGate(
             "aliyun.sms.enabled",
             "security.verification-code.log-for-dev",
             "payment.alipay-plus.auto-pay-on-order-create-enabled",
-            "payment.alipay-plus.simulated-enabled",
             "payment.stripe.legacy-enabled",
             "payment.reconciliation.enabled",
             "app.scheduling.enabled",

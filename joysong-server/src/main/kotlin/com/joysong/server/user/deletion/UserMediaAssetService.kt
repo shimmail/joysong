@@ -120,6 +120,7 @@ class UserMediaDeletionWorker(
     @Value("\${oss.private-bucket-name:}") private val privateOssBucketName: String,
     private val ossClientProvider: ObjectProvider<OSS>,
     private val metrics: AccountDeletionMetrics,
+    @Value("\${app.scheduling.enabled:true}") private val schedulingEnabled: Boolean,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -135,6 +136,10 @@ class UserMediaDeletionWorker(
 
     @EventListener(ApplicationReadyEvent::class)
     fun recoverInterruptedUploads() {
+        if (!schedulingEnabled) {
+            logger.info("Skipping interrupted upload recovery because application scheduling is disabled")
+            return
+        }
         findInterruptedUploads().forEach(::deleteOne)
     }
 

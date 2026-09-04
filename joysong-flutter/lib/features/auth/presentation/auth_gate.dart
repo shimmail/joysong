@@ -19,6 +19,7 @@ class AuthGate extends StatelessWidget {
     this.accountDeletionRepository,
     this.pendingAccountDeletionStore,
     this.allowPreviewData = false,
+    this.passwordOnlyLogin = false,
     super.key,
   });
 
@@ -28,6 +29,7 @@ class AuthGate extends StatelessWidget {
   final AccountSecurityRepository? accountDeletionRepository;
   final AccountDeletionPendingStore? pendingAccountDeletionStore;
   final bool allowPreviewData;
+  final bool passwordOnlyLogin;
 
   @override
   Widget build(BuildContext context) {
@@ -76,6 +78,7 @@ class AuthGate extends StatelessWidget {
               initialAutoLogin: controller.loginPreferences.autoLogin,
               initialAgreementsAccepted:
                   controller.loginPreferences.agreementsAccepted,
+              passwordOnly: passwordOnlyLogin,
             ),
           AuthStatus.authenticated => AppShell(
               key: ValueKey(controller.currentUser?.id),

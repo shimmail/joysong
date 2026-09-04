@@ -35,8 +35,10 @@ security:
 
 payment:
   alipay-plus:
-    auto-pay-on-order-create-enabled: false
-    simulated-enabled: false
+    # UAT payments are always user-initiated; order creation must never auto-pay.
+    auto-pay-on-order-create-enabled: ${ALIPAY_PLUS_AUTO_PAY_ON_ORDER_CREATE_ENABLED:false}
+    # Explicitly opt in on the ECS to exercise immediate simulated payment/refund flows.
+    simulated-enabled: ${ALIPAY_PLUS_SIMULATED_ENABLED:false}
   stripe:
     legacy-enabled: false
   reconciliation:

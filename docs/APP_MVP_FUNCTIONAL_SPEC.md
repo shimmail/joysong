@@ -432,7 +432,7 @@
 
 - 本次快速 Demo 增量已运行最小相关测试：严格目录加载器测试通过；MySQL 8.0.39 隔离测试覆盖后段故障全事务回滚、378 行 Apply、只读 Verify 和重复 Apply 零写入并通过；这不等于全量回归或远程环境验收；
 - 主代码编译通过；发布 JAR、管理端和 APK 的最终制品及远程冒烟仍待完成；
-- `docs/guide/ALIYUN_DEMO_DEPLOYMENT_GUIDE.md` 中“OSS 尚未启用 V4”的代码判断已过时；当前代码改造已完成，但新 Bucket 上传/删除集成验收仍未完成；
+- 现行 UAT/Prod 部署状态统一由 `docs/guide/deployment/README.md` 维护；公共图片 OSS 的 HTTPS/V4/region 代码基础已具备，但新 Bucket 上传/删除集成验收仍未完成；
 - `docs/test/catalog-v1.json` 已成为唯一目录源，Apply/Verify、`application-demo.yml` 和共用数据脚本已实现；对象级 Reset、固定验证码和九步接口重放仍未实现；
 - 目录版本 `2026.09.02.1` 的 20 个专业账号已统一为 App 可输入的 `+86` 密码账号，并提供不入 Git 的验收说明生成器；当前没有独立纯消费者账号，非交易 Demo 不据此宣称下单闭环已验收；
 - Flutter、管理端和后端测试资产较多，但测试文件数量不能替代当前提交的运行结果或生产等价证据。

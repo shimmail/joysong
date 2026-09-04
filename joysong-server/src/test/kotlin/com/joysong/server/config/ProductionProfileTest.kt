@@ -146,7 +146,10 @@ class ProductionProfileTest {
             "\${ALIPAY_PLUS_SIMULATED_ENABLED:false}",
             applicationProperties.getProperty("payment.alipay-plus.simulated-enabled")
         )
-        assertEquals(false, properties.getProperty("payment.alipay-plus.simulated-enabled"))
+        assertEquals(
+            "\${ALIPAY_PLUS_SIMULATED_ENABLED:false}",
+            properties.getProperty("payment.alipay-plus.simulated-enabled")
+        )
     }
 
     @Test
@@ -161,11 +164,15 @@ class ProductionProfileTest {
             applicationProperties.getProperty("payment.alipay-plus.auto-pay-on-order-create-enabled")
         )
         assertEquals(true, developmentProperties.getProperty("payment.alipay-plus.auto-pay-on-order-create-enabled"))
-        assertEquals(false, properties.getProperty("payment.alipay-plus.auto-pay-on-order-create-enabled"))
+        assertEquals(
+            "\${ALIPAY_PLUS_AUTO_PAY_ON_ORDER_CREATE_ENABLED:false}",
+            properties.getProperty("payment.alipay-plus.auto-pay-on-order-create-enabled")
+        )
 
         val environment = Files.readAllLines(Path.of(".env.example"))
             .associate { it.substringBefore('=') to it.substringAfter('=', "") }
         assertEquals("false", environment["ALIPAY_PLUS_AUTO_PAY_ON_ORDER_CREATE_ENABLED"])
+        assertEquals("false", environment["ALIPAY_PLUS_SIMULATED_ENABLED"])
     }
 
     @Test

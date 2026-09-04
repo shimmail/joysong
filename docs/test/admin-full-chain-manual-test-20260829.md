@@ -2,7 +2,7 @@
 
 本文从全新隔离部署开始，验收唯一固定管理员 `A-01` 的创建、登录、无临时密码重启、管理职责、固定边界、改密、退出、并发和受控改号。
 
-生产变量和管理员停机改号 SQL 以[项目配置指南](../guide/CONFIGURATION_GUIDE.md)为准；跨角色共享账号、业务对象和执行顺序以[全角色最小联调测试总流程](README.md)为准。本文不定义 `A-02`，也不包含新增管理员、普通用户升为管理员或管理员降权流程。
+生产变量和管理员停机改号 SQL 以[部署配置参考](../guide/deployment/CONFIGURATION_REFERENCE.md)为准；跨角色共享账号、业务对象和执行顺序以[全角色最小联调测试总流程](README.md)为准。本文不定义 `A-02`，也不包含新增管理员、普通用户升为管理员或管理员降权流程。
 
 ## 1. 验收目标与结论
 
@@ -267,7 +267,7 @@ Content-Type: application/json
 
 产品不支持在线改号。只改环境变量会触发配置漂移并拒绝启动；普通换号接口也会拒绝固定管理员。
 
-成功改号只能按[配置指南第 3.2 节](../guide/CONFIGURATION_GUIDE.md#32-首次创建后修改)执行停机运维事务：
+成功改号只能按[管理员停机改号](../guide/deployment/CONFIGURATION_REFERENCE.md#admin-phone-rotation)执行停机运维事务：
 
 1. 停止所有后端实例并创建可恢复备份。
 2. 核对当前唯一非 `ERASED` 管理员是目标 `userId`，状态为 `ACTIVE + ADMIN`，密码哈希非空。

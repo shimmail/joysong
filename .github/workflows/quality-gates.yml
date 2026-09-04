@@ -1,0 +1,198 @@
+name: Quality gates
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.scope.outputs.backend }}
+      admin: ${{ steps.scope.outputs.admin }}
+      flutter: ${{ steps.scope.outputs.flutter }}
+      infrastructure: ${{ steps.scope.outputs.infrastructure }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - id: scope
+        name: Detect changed components
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            changed="$(git ls-files)"
+          else
+            base="$PR_BASE_SHA"
+            [[ -n "$base" ]] || base="$PUSH_BASE_SHA"
+            if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+              base="$(git rev-parse HEAD^)"
+            fi
+            changed="$(git diff --name-only "$base" "$GITHUB_SHA")"
+          fi
+          match() { grep -Eq "$1" <<<"$changed" && printf true || printf false; }
+          {
+            echo "backend=$(match '^(joysong-server/|build.gradle|settings.gradle)')"
+            echo "admin=$(match '^joysong-admin/')"
+            echo "flutter=$(match '^joysong-flutter/')"
+            echo "infrastructure=$(match '^(\.github/|joysong-server/deploy/|docs/)')"
+          } >>"$GITHUB_OUTPUT"
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}/joysong-server/gradle/wrapper/gradle-wrapper.properties
+      - name: Test backend on isolated MySQL
+        working-directory: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}/joysong-server
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          repository_root="$(git rev-parse --show-toplevel)"
+          worktree_id="$(basename "$repository_root")"
+          [[ "$worktree_id" == worktree_* ]]
+          database_name="myapp_${worktree_id}"
+          echo "Migration/test database host: Testcontainers isolated MySQL"
+          echo "Migration/test database name: $database_name"
+          chmod +x gradlew
+          ./gradlew test mysqlIntegrationTest bootJar --no-daemon
+
+  admin:
+    needs: changes
+    if: needs.changes.outputs.admin == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: joysong-admin/package-lock.json
+      - name: Lint, test and build admin
+        working-directory: joysong-admin
+        run: |
+          npm ci
+          npm run lint
+          npm test
+          npm run build
+
+  flutter:
+    needs: changes
+    if: needs.changes.outputs.flutter == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: subosito/flutter-action@e938fdf56512cc96ef2f93601a5a40bde3801046 # v2.19.0
+        with:
+          flutter-version: '3.44.8'
+          cache: true
+      - name: Analyze and test Flutter
+        working-directory: joysong-flutter
+        run: |
+          flutter pub get
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze
+          flutter test
+
+  ios-unsigned:
+    needs: changes
+    if: needs.changes.outputs.flutter == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: subosito/flutter-action@e938fdf56512cc96ef2f93601a5a40bde3801046 # v2.19.0
+        with:
+          flutter-version: '3.44.8'
+          cache: true
+      - name: Compile unsigned iOS UAT app
+        working-directory: joysong-flutter
+        env:
+          API_BASE_URL: ${{ vars.UAT_API_BASE_URL }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$API_BASE_URL" =~ ^https://[^/[:space:]]+(/.*)?$ ]] || {
+            echo "UAT_API_BASE_URL must be an absolute HTTPS URL" >&2
+            exit 1
+          }
+          flutter pub get
+          flutter build ios --no-codesign \
+            --dart-define=APP_ENV=uat \
+            --dart-define=API_BASE_URL="$API_BASE_URL"
+
+  infrastructure:
+    needs: changes
+    if: needs.changes.outputs.infrastructure == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Validate deployment assets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 joysong-server/deploy/ci/validate-workflows.py
+          find joysong-server/deploy -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+          command -v shellcheck >/dev/null
+          mapfile -d '' shell_files < <(find joysong-server/deploy -type f -name '*.sh' -print0)
+          shell_files+=(joysong-server/deploy/host/joysong-release-dispatch)
+          shellcheck -x "${shell_files[@]}"
+          bash joysong-server/deploy/ci/run-actionlint.sh
+      - name: Validate PowerShell syntax
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem joysong-server/deploy -Recurse -File -Filter '*.ps1' | ForEach-Object {
+            $tokens = $null
+            $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$tokens,
+              [ref]$parseErrors
+            )
+            if ($parseErrors.Count -gt 0) {
+              $failed = $true
+              $parseErrors | ForEach-Object {
+                Write-Error "$($_.Extent.File):$($_.Extent.StartLineNumber): $($_.Message)" -ErrorAction Continue
+              }
+            }
+          }
+          if ($failed) { exit 1 }
+
+  quality-gates:
+    name: Required quality gates
+    if: always()
+    needs: [changes, backend, admin, flutter, ios-unsigned, infrastructure]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every selected check to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          if jq -e 'to_entries | any(.value.result == "failure" or .value.result == "cancelled")' <<<"$RESULTS"; then
+            echo "At least one selected quality gate failed."
+            exit 1
+          fi
+          echo "All selected quality gates passed."

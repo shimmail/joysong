@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
-enum AppFlavor { development, staging, production }
+enum AppFlavor { development, uat, production }
 
 enum AppPlatform { android, ios }
 
@@ -28,6 +28,13 @@ class AppEnvironment {
 
   Uri get apiRoot => apiBaseUri.resolve('/api/');
 
+  bool get allowsPreviewData => flavor == AppFlavor.development;
+
+  bool get usesPasswordOnlyLogin => flavor == AppFlavor.uat;
+
+  String get deepLinkScheme =>
+      flavor == AppFlavor.uat ? 'joysong-uat' : 'joysong';
+
   factory AppEnvironment.fromBuildDefines() {
     final platform = Platform.isAndroid ? AppPlatform.android : AppPlatform.ios;
     return AppEnvironment.resolve(
@@ -49,10 +56,12 @@ class AppEnvironment {
     String baseUrl = '',
     AgentConfig agentConfig = const AgentConfig(),
   }) {
-    final flavor = switch (flavorName.trim().toLowerCase()) {
+    final normalizedFlavor = flavorName.trim().toLowerCase();
+    final flavor = switch (normalizedFlavor) {
       'production' || 'prod' => AppFlavor.production,
-      'staging' || 'stage' => AppFlavor.staging,
-      _ => AppFlavor.development,
+      'uat' || 'staging' || 'stage' => AppFlavor.uat,
+      'development' || 'dev' || '' => AppFlavor.development,
+      _ => throw FormatException('不支持的 APP_ENV: $flavorName'),
     };
     final defaultBaseUrl = switch (platform) {
       AppPlatform.android => 'http://10.0.2.2:8080',
@@ -63,8 +72,8 @@ class AppEnvironment {
     if (!uri.hasScheme || uri.host.isEmpty) {
       throw const FormatException('API_BASE_URL 必须是包含协议和主机的 URL');
     }
-    if (flavor == AppFlavor.production && uri.scheme != 'https') {
-      throw const FormatException('生产环境 API_BASE_URL 必须使用 HTTPS');
+    if (flavor != AppFlavor.development && uri.scheme != 'https') {
+      throw const FormatException('UAT 和生产环境 API_BASE_URL 必须使用 HTTPS');
     }
 
     return AppEnvironment(

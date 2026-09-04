@@ -9,6 +9,10 @@ build/
 # Flutter platform-generated files
 android/.gradle/
 android/local.properties
+android/key.properties
+android/key.*.properties
+android/*.jks
+android/*.keystore
 ios/Flutter/ephemeral/
 ios/Flutter/Generated.xcconfig
 ios/Flutter/flutter_export_environment.sh

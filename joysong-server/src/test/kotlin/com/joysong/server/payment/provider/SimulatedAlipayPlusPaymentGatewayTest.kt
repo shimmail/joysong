@@ -19,7 +19,7 @@ class SimulatedAlipayPlusPaymentGatewayTest {
     private val now = Instant.parse("2026-08-22T08:00:00Z")
 
     @Test
-    fun `development payment succeeds immediately without a cashier redirect`() {
+    fun `simulated payment succeeds immediately without a cashier redirect`() {
         val result = gateway().createPayment(
             ProviderCreatePaymentRequest(
                 paymentId = "payment-1",
@@ -42,7 +42,7 @@ class SimulatedAlipayPlusPaymentGatewayTest {
     }
 
     @Test
-    fun `development refund succeeds immediately with a stable simulated id`() {
+    fun `simulated full refund succeeds immediately with a stable id`() {
         val request = ProviderRefundRequest(
             refundItemId = "refund-item-1",
             providerPaymentId = "simulated-alipay-plus-payment-payment-1",
@@ -60,7 +60,7 @@ class SimulatedAlipayPlusPaymentGatewayTest {
     }
 
     @Test
-    fun `development refund refuses a real provider payment id`() {
+    fun `simulated refund refuses a real provider payment id`() {
         val error = assertThrows(PaymentProviderException::class.java) {
             gateway().refund(
                 ProviderRefundRequest(
@@ -94,11 +94,17 @@ class SimulatedAlipayPlusPaymentGatewayTest {
     }
 
     @Test
-    fun `simulator bean loads only when enabled in development`() {
+    fun `simulator bean loads only when enabled in an allowed non-production profile`() {
         context(profile = "dev", enabled = true).run { context ->
             assertTrue(context.containsBean("simulatedAlipayPlusPaymentGateway"))
         }
+        context(profile = "demo", enabled = true).run { context ->
+            assertTrue(context.containsBean("simulatedAlipayPlusPaymentGateway"))
+        }
         context(profile = "dev", enabled = false).run { context ->
+            assertFalse(context.containsBean("simulatedAlipayPlusPaymentGateway"))
+        }
+        context(profile = "demo", enabled = false).run { context ->
             assertFalse(context.containsBean("simulatedAlipayPlusPaymentGateway"))
         }
         context(profile = "prod", enabled = true).run { context ->

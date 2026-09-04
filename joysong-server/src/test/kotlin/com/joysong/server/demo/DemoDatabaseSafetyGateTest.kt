@@ -13,7 +13,7 @@ import javax.sql.DataSource
 
 class DemoDatabaseSafetyGateTest {
     @Test
-    fun `database safety gate permits public OSS for an isolated demo`() {
+    fun `database safety gate permits public OSS and simulated payment for an isolated demo`() {
         val databaseName = "myapp_worktree_demo_upload"
         val jdbcUrl = "jdbc:mysql://db.internal:3306/$databaseName"
         val dataSource = mockk<DataSource>()
@@ -32,6 +32,7 @@ class DemoDatabaseSafetyGateTest {
         val environment = MockEnvironment().apply {
             setActiveProfiles("demo")
             withProperty("oss.enabled", "true")
+            withProperty("payment.alipay-plus.simulated-enabled", "true")
             withProperty("spring.jpa.hibernate.ddl-auto", "validate")
             withProperty("spring.flyway.enabled", "true")
             withProperty("spring.flyway.validate-on-migrate", "true")

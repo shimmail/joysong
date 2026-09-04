@@ -1,0 +1,75 @@
+@startuml
+title JoySong GitHub CI/CD and Alibaba Cloud UAT
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+actor Developer
+actor "UAT Reviewer" as Reviewer
+
+rectangle GitHub {
+  component "Pull Request\nquality gates" as CI
+  component "UAT tag\nDraft Release" as Release
+  component "Acceptance Issue" as Issue
+  component "Promote / Rollback" as Control
+}
+
+cloud "Alibaba Cloud" {
+  component "OIDC RAM Role" as OIDC
+  storage "Private release OSS" as ReleaseOss
+  component "Cloud Assistant" as Assistant
+
+  node "Existing ECS\n(UAT Candidate -> UAT)" as ECS {
+    component "existing joysong-demo\n(frozen only at final cutover)" as OldBackend
+    component "root dispatcher" as Dispatcher
+    component "joysong-deploy" as DeployUser
+    component "Nginx\nHTTPS / persistent maintenance" as Nginx
+    component "joysong-uat\nSpring Boot" as Backend
+    folder "releases/<tag>\ncurrent / previous" as Releases
+    folder "root-only backup identity\nconfig / DB / data" as Backups
+    file "persistent transaction marker" as Marker
+    database "Isolated MySQL\nmyapp_worktree_*" as UatDb
+    folder "Persistent public/private files" as Files
+  }
+}
+
+Developer --> CI
+CI --> Release : full gates pass
+Release --> OIDC : short-lived credentials
+OIDC --> ReleaseOss : upload immutable bundle
+OIDC --> Assistant : RunCommand on tagged ECS
+Assistant --> Dispatcher : env + release + manifest SHA
+Dispatcher --> DeployUser : fixed allowlisted operation
+DeployUser --> ReleaseOss : short-lived download
+DeployUser --> Releases : verify and stage
+Dispatcher --> Backups : capture before mutation
+Dispatcher --> Marker : fail closed during switch
+Marker --> Nginx : 503 until verified
+Marker --> Backend : block reboot/startup
+OldBackend --> UatDb : current writer before cutover
+Dispatcher --> OldBackend : bind identity, freeze, verify stopped
+Releases --> Backend : atomic current switch
+Releases --> Nginx : Admin static root
+Backend --> UatDb
+Backend --> Files
+Nginx --> Backend
+
+Release --> Issue : create after technical checks
+Reviewer --> Issue : record business acceptance
+Issue --> Control : accepted or rejected
+Control --> Release : Draft -> Pre-release
+Control --> Dispatcher : manual rollback
+
+note right of ECS
+  UAT and future Prod use isolated
+  users, ports, directories, secrets,
+  databases and release links.
+end note
+
+note bottom of Control
+  Prod remains disabled until both
+  GitHub variable and root sentinel
+  are enabled and all blockers clear.
+end note
+
+@enduml
