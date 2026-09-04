@@ -408,7 +408,7 @@ jobs:
             >release/rds-backup-evidence.json
           (cd release && sha256sum rds-backup-evidence.json >>SHA256SUMS)
           echo "backup_id=$backup_id" >>"$GITHUB_OUTPUT"
-          printf 'Production RDS backup ID: `%s`\n' "$backup_id" >>"$GITHUB_STEP_SUMMARY"
+          printf "Production RDS backup ID: \`%s\`\n" "$backup_id" >>"$GITHUB_STEP_SUMMARY"
       - name: Refresh short-lived credentials after the backup gate
         uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6 # v1
         with:
