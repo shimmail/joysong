@@ -86,21 +86,19 @@ class AuthGate extends StatelessWidget {
               apiClient: apiClient,
               allowPreviewData: allowPreviewData,
               currentUserId: controller.currentUser?.id ?? '',
-              accountSecurityControllerFactory:
-                  accountDeletionRepository == null
-                      ? null
-                      : () => AccountSecurityController(
-                            accountDeletionRepository!,
-                            pendingDeletionStore:
-                                pendingAccountDeletionStore ??
-                                    SecureAccountDeletionPendingStore(),
-                            googleIdTokenProvider: GoogleIdentityProvider
-                                .instance.requestIdToken,
-                            onDeletionConfirmed:
-                                controller.completeAccountDeletion,
-                            onDeletionUncertain:
-                                controller.holdPendingAccountDeletion,
-                          ),
+              accountSecurityControllerFactory: accountDeletionRepository ==
+                      null
+                  ? null
+                  : () => AccountSecurityController(
+                        accountDeletionRepository!,
+                        pendingDeletionStore: pendingAccountDeletionStore ??
+                            SecureAccountDeletionPendingStore(),
+                        googleIdTokenProvider:
+                            GoogleIdentityProvider.instance.requestIdToken,
+                        onDeletionConfirmed: controller.completeAccountDeletion,
+                        onDeletionUncertain:
+                            controller.holdPendingAccountDeletion,
+                      ),
               onSwitchAccount: _showAccountSwitcher,
               onProfileUpdated: controller.updateCurrentAccountProfile,
               onLogout: controller.logout,
@@ -188,28 +186,23 @@ class _AccountSwitcherSheet extends StatelessWidget {
                                 : null,
                           ),
                           title: Text(account.nickname.isEmpty
-                              ? (_isEnglish(context)
-                                  ? 'Joysong user'
-                                  : '娇颜颂用户')
+                              ? (_isEnglish(context) ? 'Joysong user' : '娇颜颂用户')
                               : account.nickname),
                           subtitle: account.identifier.isEmpty
                               ? null
                               : Text(account.identifier),
-                          trailing:
-                              account.userId == controller.currentUser?.id
-                                  ? Icon(
-                                      Icons.check_circle,
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .primary,
-                                    )
-                                  : IconButton(
-                                      tooltip:
-                                          _isEnglish(context) ? 'Remove' : '移除',
-                                      onPressed: () => controller
-                                          .removeSavedAccount(account.userId),
-                                      icon: const Icon(Icons.close_rounded),
-                                    ),
+                          trailing: account.userId == controller.currentUser?.id
+                              ? Icon(
+                                  Icons.check_circle,
+                                  color: Theme.of(context).colorScheme.primary,
+                                )
+                              : IconButton(
+                                  tooltip:
+                                      _isEnglish(context) ? 'Remove' : '移除',
+                                  onPressed: () => controller
+                                      .removeSavedAccount(account.userId),
+                                  icon: const Icon(Icons.close_rounded),
+                                ),
                           onTap: account.userId == controller.currentUser?.id
                               ? null
                               : () async {
@@ -227,9 +220,8 @@ class _AccountSwitcherSheet extends StatelessWidget {
                 ListTile(
                   key: const Key('add-account-button'),
                   leading: const Icon(Icons.person_add_alt_1_rounded),
-                  title: Text(_isEnglish(context)
-                      ? 'Add another account'
-                      : '添加其他账号'),
+                  title: Text(
+                      _isEnglish(context) ? 'Add another account' : '添加其他账号'),
                   onTap: onAdd,
                 ),
               ]),

@@ -262,8 +262,7 @@ class _JoysongAppState extends State<JoysongApp> {
                       agentConfig: widget.environment.agentConfig,
                       apiClient: _apiClient,
                       accountDeletionRepository: _accountDeletionRepository,
-                      pendingAccountDeletionStore:
-                          _pendingAccountDeletionStore,
+                      pendingAccountDeletionStore: _pendingAccountDeletionStore,
                       allowPreviewData: widget.environment.allowsPreviewData,
                       passwordOnlyLogin:
                           widget.environment.usesPasswordOnlyLogin,

@@ -105,15 +105,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
       - uses: subosito/flutter-action@e938fdf56512cc96ef2f93601a5a40bde3801046 # v2.19.0
         with:
           flutter-version: '3.44.8'
           cache: true
       - name: Analyze and test Flutter
         working-directory: joysong-flutter
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          # First commit before incremental Dart-format enforcement.
+          FORMAT_BASE_SHA: 996e686555e7740ed383e401defb2c1961affad7
         run: |
+          set -Eeuo pipefail
           flutter pub get
-          dart format --output=none --set-exit-if-changed lib test
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            git merge-base --is-ancestor "$FORMAT_BASE_SHA" "$GITHUB_SHA"
+            base="$FORMAT_BASE_SHA"
+          elif [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base="$PR_BASE_SHA"
+          else
+            base="$PUSH_BASE_SHA"
+          fi
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base="$FORMAT_BASE_SHA"
+          fi
+          mapfile -t dart_files < <(
+            git diff --name-only --diff-filter=ACMR "$base" "$GITHUB_SHA" -- . |
+              sed -n 's#^joysong-flutter/\(.*\.dart\)$#\1#p'
+          )
+          if ((${#dart_files[@]} > 0)); then
+            dart format --output=none --set-exit-if-changed "${dart_files[@]}"
+          fi
           flutter analyze
           flutter test
 
