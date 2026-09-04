@@ -8,9 +8,9 @@ import org.springframework.stereotype.Component
 import java.time.Clock
 import java.time.LocalDateTime
 
-/** Development-only adapter for exercising the real local payment and refund state machines. */
+/** Non-production adapter for exercising the real payment and refund state machines without moving funds. */
 @Component
-@Profile("dev & !prod")
+@Profile("!prod & (dev | demo)")
 @ConditionalOnProperty(
     prefix = "payment.alipay-plus",
     name = ["simulated-enabled"],

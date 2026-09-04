@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'dart:io';
 
 import 'package:joysong_flutter/features/social/data/public_media_upload.dart';
 import 'package:joysong_flutter/features/social/data/social_remote_data_source.dart';
@@ -9,19 +9,12 @@ final class SocialRepositoryImpl
     implements SocialRepository, SocialTranslationRepository {
   SocialRepositoryImpl({
     required SocialRemoteDataSource remoteDataSource,
-    required PublicImagePreprocessor imagePreprocessor,
     required PublicMediaUploader mediaUploader,
-    PublicImageCompressionPolicy compressionPolicy =
-        const PublicImageCompressionPolicy(),
   })  : _remoteDataSource = remoteDataSource,
-        _imagePreprocessor = imagePreprocessor,
-        _mediaUploader = mediaUploader,
-        _compressionPolicy = compressionPolicy;
+        _mediaUploader = mediaUploader;
 
   final SocialRemoteDataSource _remoteDataSource;
-  final PublicImagePreprocessor _imagePreprocessor;
   final PublicMediaUploader _mediaUploader;
-  final PublicImageCompressionPolicy _compressionPolicy;
 
   @override
   Future<PublicUserProfile> getPublicUserProfile(String userId) {
@@ -253,33 +246,21 @@ final class SocialRepositoryImpl
     if (media.privacy == MediaPrivacy.privateIdentityMaterial) {
       throw const PrivateMaterialUploadException();
     }
-    _validateSource(media);
+    await _validateSource(media);
     yield PublicUploadProgress(
       stage: UploadStage.queued,
-      totalBytes: media.bytes.length,
-    );
-    yield PublicUploadProgress(
-      stage: UploadStage.compressing,
-      totalBytes: media.bytes.length,
+      totalBytes: media.byteLength,
     );
 
     try {
-      final prepared =
-          await _imagePreprocessor.prepare(media, _compressionPolicy);
-      if (prepared.privacy != MediaPrivacy.publicContent) {
-        throw const PrivateMaterialUploadException();
-      }
-      if (prepared.purpose != media.purpose) {
-        throw const FormatException('图片预处理结果用途发生变化');
-      }
-      _validatePrepared(prepared);
-
       var terminalReceived = false;
       final request = PublicUploadRequest(
-        bytes: prepared.bytes,
-        fileName: prepared.fileName,
-        mimeType: prepared.mimeType,
-        folder: _folder(prepared.purpose),
+        uploadId: media.uploadId,
+        localPath: media.localPath,
+        byteLength: media.byteLength,
+        fileName: media.fileName,
+        mimeType: media.mimeType,
+        folder: _folder(media.purpose),
       );
       await for (final progress in _mediaUploader.upload(request)) {
         if (progress.stage == UploadStage.complete &&
@@ -307,36 +288,46 @@ final class SocialRepositoryImpl
     }
   }
 
-  void _validateSource(PublicMediaDraft media) {
-    if (media.bytes.isEmpty) {
-      throw ArgumentError.value(media.bytes, 'bytes', '图片内容不能为空');
+  Future<void> _validateSource(PublicMediaDraft media) async {
+    if (media.uploadId.trim().isEmpty ||
+        media.uploadId.contains('\r') ||
+        media.uploadId.contains('\n')) {
+      throw ArgumentError.value(media.uploadId, 'uploadId', '上传标识格式不正确');
+    }
+    if (media.localPath.trim().isEmpty) {
+      throw ArgumentError.value(media.localPath, 'localPath', '图片路径不能为空');
     }
     if (media.fileName.trim().isEmpty) {
       throw ArgumentError.value(media.fileName, 'fileName', '文件名不能为空');
     }
-  }
-
-  void _validatePrepared(PublicMediaDraft media) {
-    _validateSource(media);
-    if (media.bytes.length > _compressionPolicy.maxBytes) {
-      throw ArgumentError.value(media.bytes.length, 'bytes', '图片不能超过 10 MB');
+    final file = File(media.localPath);
+    if (!await file.exists()) {
+      throw ArgumentError.value(media.localPath, 'localPath', '图片文件不存在');
+    }
+    final actualLength = await file.length();
+    if (actualLength <= 0 || actualLength != media.byteLength) {
+      throw ArgumentError.value(media.byteLength, 'byteLength', '图片大小已发生变化');
+    }
+    if (actualLength > 10 * 1024 * 1024) {
+      throw ArgumentError.value(actualLength, 'byteLength', '图片不能超过 10 MB');
     }
     final extension = media.fileName.split('.').last.toLowerCase();
-    const allowedExtensions = {'jpg', 'jpeg', 'png', 'webp', 'gif'};
+    const allowedExtensions = {'jpg', 'jpeg', 'png'};
     if (!allowedExtensions.contains(extension)) {
-      throw ArgumentError.value(
-          media.fileName, 'fileName', '仅支持 JPG、PNG、WebP 或 GIF');
+      throw ArgumentError.value(media.fileName, 'fileName', '仅支持 JPG 或 PNG');
     }
-    const allowedMimeTypes = {
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-      'image/gif',
-    };
+    const allowedMimeTypes = {'image/jpeg', 'image/png'};
     if (!allowedMimeTypes.contains(media.mimeType.toLowerCase())) {
       throw ArgumentError.value(media.mimeType, 'mimeType', '图片 MIME 类型不受支持');
     }
-    if (!_hasValidSignature(media.bytes, extension)) {
+    final handle = await file.open();
+    late final List<int> signature;
+    try {
+      signature = await handle.read(12);
+    } finally {
+      await handle.close();
+    }
+    if (!_hasValidSignature(signature, extension)) {
       throw ArgumentError.value(media.fileName, 'fileName', '文件内容与图片格式不匹配');
     }
   }
@@ -398,13 +389,6 @@ bool _hasValidSignature(List<int> bytes, String extension) {
         .asMap()
         .entries
         .every((entry) => bytes[entry.key] == entry.value),
-    'gif' => const ['GIF87a', 'GIF89a'].contains(
-        ascii.decode(bytes.take(6).toList(), allowInvalid: true),
-      ),
-    'webp' =>
-      ascii.decode(bytes.take(4).toList(), allowInvalid: true) == 'RIFF' &&
-          ascii.decode(bytes.skip(8).take(4).toList(), allowInvalid: true) ==
-              'WEBP',
     _ => false,
   };
 }

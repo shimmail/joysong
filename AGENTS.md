@@ -78,11 +78,3 @@
 - 不自动调用任何 Superpowers skill
 - 按普通原生 agent 模式直接响应[reference:8]
 
-## Docs merge policy
-
-- `docs/**` 以本地 `master` 的已提交版本为准。
-- 除非用户明确要求更新文档，功能 worktree 不得新增、修改、删除 `docs/**`。
-- 合并最新 master 后，若功能分支涉及 `docs/**`，统一恢复为 master：
-  `git restore --source=master --staged --worktree -- docs/`
-- 如果主工作区的文档尚未提交，停止合并并等待用户先提交。
-- 不得使用全局 `-X theirs`，避免同时覆盖代码冲突。

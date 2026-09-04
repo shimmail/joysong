@@ -1,0 +1,30 @@
+name: UAT acceptance checklist
+description: Reference checklist; the candidate workflow creates the authoritative issue with immutable tag and commit markers.
+title: "UAT acceptance: "
+labels:
+  - uat-awaiting-acceptance
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The `UAT candidate` workflow creates the authoritative acceptance issue.
+        Do not use a manually created issue for promotion: it lacks the workflow-owned tag and commit markers and will be rejected.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Business acceptance
+      options:
+        - label: Password login works with an existing test account.
+          required: true
+        - label: Fictional institutions, doctors, projects and content render correctly.
+          required: true
+        - label: AI chat and translation work.
+          required: true
+        - label: OSS image upload and public retrieval work.
+          required: true
+        - label: User-triggered simulated payment succeeds immediately.
+          required: true
+        - label: Full refund succeeds after administrator approval.
+          required: true
+        - label: Installing over the previous UAT APK retains local data.
+          required: true

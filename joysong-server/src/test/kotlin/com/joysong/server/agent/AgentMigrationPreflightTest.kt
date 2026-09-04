@@ -119,8 +119,14 @@ class AgentMigrationPreflightTest {
         System.getProperty("java.class.path").split(System.getProperty("path.separator"))
             .single { it.contains("mysql-connector-j") && it.endsWith(".jar") }
 
-    private fun javaExecutable(): String =
-        Path.of(System.getProperty("java.home"), "bin", "java.exe").toString()
+    private fun javaExecutable(): String {
+        val executable = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+            "java.exe"
+        } else {
+            "java"
+        }
+        return Path.of(System.getProperty("java.home"), "bin", executable).toString()
+    }
 
     private fun printIsolationBoundary() {
         println("AGENT_PREFLIGHT_TEST_DB_HOST=Testcontainers(${mysql.host}:${mysql.getMappedPort(3306)})")

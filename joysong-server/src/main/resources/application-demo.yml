@@ -1,0 +1,70 @@
+spring:
+  config:
+    activate:
+      on-profile: demo
+  datasource:
+    # Demo databases must be pre-created and isolated. Never add
+    # createDatabaseIfNotExist=true to this URL.
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+  flyway:
+    enabled: true
+    validate-on-migrate: true
+    baseline-on-migrate: false
+    clean-disabled: true
+  devtools:
+    restart:
+      enabled: false
+
+oss:
+  # Public media may explicitly use OSS; private storage is configured independently.
+  enabled: ${OSS_ENABLED:false}
+
+aliyun:
+  sms:
+    enabled: false
+
+security:
+  verification-code:
+    log-for-dev: false
+
+payment:
+  alipay-plus:
+    # UAT payments are always user-initiated; order creation must never auto-pay.
+    auto-pay-on-order-create-enabled: ${ALIPAY_PLUS_AUTO_PAY_ON_ORDER_CREATE_ENABLED:false}
+    # Explicitly opt in on the ECS to exercise immediate simulated payment/refund flows.
+    simulated-enabled: ${ALIPAY_PLUS_SIMULATED_ENABLED:false}
+  stripe:
+    legacy-enabled: false
+  reconciliation:
+    enabled: false
+
+app:
+  scheduling:
+    enabled: false
+  account-deletion:
+    enabled: false
+    allow-commerce-bypass: false
+
+# The existing configuration validator requires an approved Agent endpoint in
+# every profile. Credentials and models remain explicit deployment secrets.
+ai-agent:
+  provider: ${AI_AGENT_PROVIDER:qwen}
+  api-key: ${AI_AGENT_API_KEY:}
+  base-url: ${AI_AGENT_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+  model: ${AI_AGENT_MODEL:}
+  intent-model: ${AI_AGENT_INTENT_MODEL:}
+
+seed:
+  demo:
+    enabled: ${DEMO_DATA_ENABLED:false}
+    action: ${DEMO_DATA_ACTION:VERIFY}
+    catalog-path: ${DEMO_CATALOG_PATH:}
+    expected-database-name: ${DEMO_DATABASE_NAME}
+    account-password: ${DEMO_ACCOUNT_PASSWORD:}
+    replay-code-enabled: false

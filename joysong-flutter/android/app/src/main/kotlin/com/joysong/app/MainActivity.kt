@@ -18,7 +18,7 @@ class MainActivity : FlutterActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             FILE_PICKER_CHANNEL,
         ).setMethodCallHandler { call, result ->
-            if (call.method != "pickFile" && call.method != "pickImage") {
+            if (call.method != "pickFile") {
                 result.notImplemented()
                 return@setMethodCallHandler
             }
@@ -26,20 +26,13 @@ class MainActivity : FlutterActivity() {
                 result.error("PICK_IN_PROGRESS", "A file picker is already open.", null)
                 return@setMethodCallHandler
             }
-            val intent = if (call.method == "pickImage") {
-                Intent(Intent.ACTION_PICK).apply {
-                    type = "image/*"
-                    data = android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                }
-            } else {
-                val extensions = call.argument<List<String>>("extensions").orEmpty()
-                val mimeTypes = extensions.mapNotNull(::mimeTypeForExtension).distinct()
-                Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = if (mimeTypes.size == 1) mimeTypes.first() else "*/*"
-                    if (mimeTypes.size > 1) {
-                        putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes.toTypedArray())
-                    }
+            val extensions = call.argument<List<String>>("extensions").orEmpty()
+            val mimeTypes = extensions.mapNotNull(::mimeTypeForExtension).distinct()
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = if (mimeTypes.size == 1) mimeTypes.first() else "*/*"
+                if (mimeTypes.size > 1) {
+                    putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes.toTypedArray())
                 }
             }
             pendingFileResult = result

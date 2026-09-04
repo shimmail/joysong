@@ -1,0 +1,6 @@
+# Copy this file to key.uat.properties on the release build machine.
+# Never commit key.uat.properties or the UAT keystore itself.
+storeFile=D:\\secure\\joysong-uat-release.jks
+storePassword=replace-me
+keyAlias=joysong-uat
+keyPassword=replace-me

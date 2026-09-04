@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:joysong_flutter/core/translation/content_translation.dart'
     as core_translation;
 
@@ -53,7 +51,7 @@ enum PublicMediaPurpose {
 
 enum MediaPrivacy { publicContent, privateIdentityMaterial }
 
-enum UploadStage { queued, compressing, uploading, complete, failed }
+enum UploadStage { queued, uploading, processing, complete, failed, cancelled }
 
 final class PublicUserProfile {
   const PublicUserProfile({
@@ -435,15 +433,19 @@ final class ReviewDraft {
 }
 
 final class PublicMediaDraft {
-  PublicMediaDraft({
-    required Uint8List bytes,
+  const PublicMediaDraft({
+    required this.uploadId,
+    required this.localPath,
+    required this.byteLength,
     required this.fileName,
     required this.mimeType,
     required this.purpose,
     this.privacy = MediaPrivacy.publicContent,
-  }) : bytes = Uint8List.fromList(bytes);
+  });
 
-  final Uint8List bytes;
+  final String uploadId;
+  final String localPath;
+  final int byteLength;
   final String fileName;
   final String mimeType;
   final PublicMediaPurpose purpose;
@@ -471,7 +473,9 @@ final class PublicUploadProgress {
       totalBytes <= 0 ? 0 : (bytesSent / totalBytes).clamp(0, 1).toDouble();
 
   bool get isTerminal =>
-      stage == UploadStage.complete || stage == UploadStage.failed;
+      stage == UploadStage.complete ||
+      stage == UploadStage.failed ||
+      stage == UploadStage.cancelled;
 }
 
 final class PrivateMaterialUploadException implements Exception {

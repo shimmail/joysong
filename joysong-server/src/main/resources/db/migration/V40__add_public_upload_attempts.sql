@@ -1,0 +1,26 @@
+CREATE TABLE `public_upload_attempts` (
+    `id` VARCHAR(36) NOT NULL,
+    `owner_user_id` VARCHAR(36) NOT NULL,
+    `client_upload_id` VARCHAR(36) NOT NULL,
+    `folder` VARCHAR(64) NOT NULL,
+    `content_sha256` CHAR(64) NOT NULL,
+    `content_length` BIGINT UNSIGNED NOT NULL,
+    `content_type` VARCHAR(64) NOT NULL,
+    `storage_key` VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    `status` VARCHAR(16) NOT NULL,
+    `lease_token` VARCHAR(36) NULL,
+    `lease_expires_at` DATETIME(6) NULL,
+    `public_url` VARCHAR(2048) NULL,
+    `failure_code` VARCHAR(64) NULL,
+    `failure_retryable` BOOLEAN NULL,
+    `completed_at` DATETIME(6) NULL,
+    `expires_at` DATETIME(6) NOT NULL,
+    `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_public_upload_owner_client_id` (`owner_user_id`, `client_upload_id`),
+    KEY `idx_public_upload_expiry` (`expires_at`),
+    KEY `idx_public_upload_status_lease` (`status`, `lease_expires_at`),
+    CONSTRAINT `fk_public_upload_owner`
+        FOREIGN KEY (`owner_user_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

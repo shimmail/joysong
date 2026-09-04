@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import com.joysong.server.admin.controller.InstitutionProjectController
 import com.joysong.server.admin.entity.dto.DoctorProjectBinding
 import com.joysong.server.config.OrderSplitProperties
+import com.joysong.server.config.TravelGroundServicePricingProperties
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.doctor.repository.DoctorInstitutionRepository
 import com.joysong.server.doctor.repository.DoctorRepository
@@ -81,7 +82,7 @@ class DoctorProjectFullEditPersistenceTest {
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var service: DoctorProjectChangeService
     @Autowired private lateinit var objectMapper: ObjectMapper
-    @Autowired private lateinit var splitProperties: OrderSplitProperties
+    @Autowired private lateinit var pricingProperties: TravelGroundServicePricingProperties
     @Autowired private lateinit var cacheManager: CacheManager
     @Autowired private lateinit var institutionProjectRepository: InstitutionProjectRepository
     @Autowired private lateinit var doctorProjectRepository: DoctorProjectRepository
@@ -675,9 +676,9 @@ class DoctorProjectFullEditPersistenceTest {
 
         seed()
         val priced = submit("doctor-1", sharedName = null, price = BigDecimal("125.00"), active = false)
-        val previousRate = splitProperties.platformRate
+        val previousRate = pricingProperties.serviceFeeRate
         try {
-            splitProperties.platformRate = BigDecimal("41.00")
+            pricingProperties.serviceFeeRate = BigDecimal("41.00")
             val pricingRevision = requireNotNull(
                 (service.listV2(adminActor()).single { it.id == priced.id } as VersionedDoctorProjectChangeViewV2)
                     .latestRevision
@@ -687,7 +688,7 @@ class DoctorProjectFullEditPersistenceTest {
             }
             assertEquals(ProjectChangeErrorCode.PRICING_POLICY_STALE, pricingError.errorCode)
         } finally {
-            splitProperties.platformRate = previousRate
+            pricingProperties.serviceFeeRate = previousRate
         }
     }
 

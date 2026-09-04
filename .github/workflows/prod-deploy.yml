@@ -1,0 +1,465 @@
+name: Production deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      uat_tag:
+        description: Accepted UAT Pre-release tag
+        required: true
+        type: string
+      acceptance_issue:
+        description: Closed UAT acceptance Issue number
+        required: true
+        type: string
+      prod_tag:
+        description: New stable tag (vX.Y.Z)
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: prod-deployment
+  cancel-in-progress: false
+
+jobs:
+  accepted-artifacts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      commit: ${{ steps.identity.outputs.commit }}
+      manifest_sha: ${{ steps.identity.outputs.manifest_sha }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+      - id: identity
+        name: Enforce disabled-by-default and accepted-commit gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
+          UAT_TAG: ${{ inputs.uat_tag }}
+          PROD_TAG: ${{ inputs.prod_tag }}
+          ISSUE: ${{ inputs.acceptance_issue }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .visibility)" == "private" ]] || {
+            echo "Production releases require a private GitHub repository" >&2
+            exit 1
+          }
+          [[ "$DEPLOY_ENABLED" == "true" ]] || {
+            echo "Production deploy is disabled by repository variable PROD_DEPLOY_ENABLED" >&2
+            exit 1
+          }
+          [[ "$UAT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-uat\.[0-9]+$ ]]
+          [[ "$PROD_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "${UAT_TAG%-uat.*}" == "$PROD_TAG" ]] || {
+            echo "Production tag must equal the accepted UAT tag's base version" >&2
+            exit 1
+          }
+          git fetch --force origin "refs/tags/$UAT_TAG:refs/tags/$UAT_TAG"
+          commit="$(git rev-parse "$UAT_TAG^{commit}")"
+          [[ "$(gh release view "$UAT_TAG" --json isPrerelease --jq .isPrerelease)" == "true" ]]
+          if git ls-remote --exit-code --tags origin "refs/tags/$PROD_TAG" >/dev/null 2>&1; then
+            echo "Stable tag is immutable and already exists" >&2
+            exit 1
+          fi
+          bash joysong-server/deploy/ci/verify-uat-acceptance.sh "$UAT_TAG" "$commit" "$ISSUE"
+          issue_body="$(gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE" --jq '.body // ""')"
+          manifest_sha="$(sed -n 's/^<!-- joysong-manifest-sha:\([0-9a-f]\{64\}\) -->$/\1/p' <<<"$issue_body")"
+          [[ "$manifest_sha" =~ ^[0-9a-f]{64}$ ]]
+          echo "commit=$commit" >>"$GITHUB_OUTPUT"
+          echo "manifest_sha=$manifest_sha" >>"$GITHUB_OUTPUT"
+      - name: Require the accepted UAT release on isolated UAT domains
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UAT_TAG: ${{ inputs.uat_tag }}
+          ACCEPTED_COMMIT: ${{ steps.identity.outputs.commit }}
+          UAT_API_BASE_URL: ${{ vars.UAT_API_BASE_URL }}
+          UAT_ADMIN_BASE_URL: ${{ vars.UAT_ADMIN_BASE_URL }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - "$UAT_API_BASE_URL" "$UAT_ADMIN_BASE_URL" <<'PY'
+          import sys
+          from urllib.parse import urlsplit
+
+          api, admin = map(urlsplit, sys.argv[1:])
+          if (api.scheme != "https" or api.hostname != "api-uat.joyingsong.net" or
+                  api.path not in ("", "/") or api.port not in (None, 443) or
+                  api.username or api.password or api.query or api.fragment):
+              raise SystemExit("UAT_API_BASE_URL must be the isolated api-uat.joyingsong.net HTTPS origin")
+          if (admin.scheme != "https" or admin.hostname != "uat.joyingsong.net" or
+                  admin.path not in ("", "/") or admin.port not in (None, 443) or
+                  admin.username or admin.password or admin.query or admin.fragment):
+              raise SystemExit("UAT_ADMIN_BASE_URL must be the isolated uat.joyingsong.net HTTPS origin")
+          PY
+          api_base="${UAT_API_BASE_URL%/}"
+          admin_base="${UAT_ADMIN_BASE_URL%/}"
+          curl --fail --silent --show-error --max-time 15 \
+            "$api_base/.well-known/joysong-release.json" >"$RUNNER_TEMP/uat-api-release.json"
+          curl --fail --silent --show-error --max-time 15 \
+            "$admin_base/.well-known/joysong-release.json" >"$RUNNER_TEMP/uat-admin-release.json"
+          mkdir "$RUNNER_TEMP/accepted-uat-identity"
+          gh release download "$UAT_TAG" --dir "$RUNNER_TEMP/accepted-uat-identity" --pattern release.json
+          cmp --silent "$RUNNER_TEMP/accepted-uat-identity/release.json" "$RUNNER_TEMP/uat-api-release.json"
+          cmp --silent "$RUNNER_TEMP/accepted-uat-identity/release.json" "$RUNNER_TEMP/uat-admin-release.json"
+          python3 - "$RUNNER_TEMP/uat-api-release.json" "$UAT_TAG" "$ACCEPTED_COMMIT" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          path, tag, commit = sys.argv[1:]
+          identity = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+          if identity.get("environment") != "uat" or identity.get("tag") != tag or identity.get("commit") != commit:
+              raise SystemExit("isolated UAT domains do not serve the accepted release")
+          PY
+          curl --fail --silent --show-error --max-time 15 "$api_base/actuator/health" >/dev/null
+          curl --fail --silent --show-error --max-time 15 "$admin_base/" >/dev/null
+      - name: Download previously accepted backend and admin bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UAT_TAG: ${{ inputs.uat_tag }}
+          ACCEPTED_COMMIT: ${{ steps.identity.outputs.commit }}
+          ACCEPTED_MANIFEST_SHA: ${{ steps.identity.outputs.manifest_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir accepted
+          gh release download "$UAT_TAG" --dir accepted \
+            --pattern server.jar \
+            --pattern admin.tar.gz \
+            --pattern sbom.cdx.json \
+            --pattern trivy-results.json \
+            --pattern manifest.json \
+            --pattern SHA256SUMS
+          for file in server.jar admin.tar.gz sbom.cdx.json trivy-results.json manifest.json SHA256SUMS; do
+            test -f "accepted/$file"
+          done
+          printf '%s  %s\n' "$ACCEPTED_MANIFEST_SHA" accepted/manifest.json | sha256sum --check --status
+          grep -E '  (server\.jar|admin\.tar\.gz|sbom\.cdx\.json|trivy-results\.json|manifest\.json)$' \
+            accepted/SHA256SUMS >accepted/ACCEPTED_SHA256SUMS
+          (cd accepted && sha256sum --check ACCEPTED_SHA256SUMS)
+          python3 - accepted/manifest.json "$UAT_TAG" "$ACCEPTED_COMMIT" <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import sys
+
+          manifest_path, tag, commit = sys.argv[1:]
+          root = pathlib.Path(manifest_path).parent
+          data = json.loads(pathlib.Path(manifest_path).read_text(encoding="utf-8"))
+          if data.get("schemaVersion") != 1 or data.get("environment") != "uat":
+              raise SystemExit("accepted UAT manifest identity is invalid")
+          if data.get("tag") != tag or data.get("commit") != commit:
+              raise SystemExit("accepted UAT tag or commit mismatch")
+          if data.get("apiBaseUrl") != "https://api-uat.joyingsong.net":
+              raise SystemExit("accepted UAT APK/release was not built for the isolated API origin")
+          if data.get("adminBaseUrl") != "https://uat.joyingsong.net":
+              raise SystemExit("accepted UAT release was not built for the isolated Admin origin")
+          migration_digest = data.get("databaseMigrationsSha256")
+          if (not isinstance(migration_digest, str) or len(migration_digest) != 64 or
+                  any(character not in "0123456789abcdef" for character in migration_digest)):
+              raise SystemExit("accepted UAT migration digest is invalid")
+          if not isinstance(data.get("buildNumber"), int) or data["buildNumber"] < 1:
+              raise SystemExit("accepted UAT buildNumber is invalid")
+          artifacts = data.get("artifacts")
+          if not isinstance(artifacts, list):
+              raise SystemExit("accepted UAT artifact list is invalid")
+          hashes = {
+              item.get("name"): item.get("sha256")
+              for item in artifacts
+              if isinstance(item, dict)
+          }
+          for name in ("server.jar", "admin.tar.gz", "sbom.cdx.json", "trivy-results.json"):
+              path = root / name
+              if not path.is_file() or hashes.get(name) != hashlib.sha256(path.read_bytes()).hexdigest():
+                  raise SystemExit(f"accepted UAT artifact hash mismatch: {name}")
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: accepted-server-admin
+          path: accepted
+          if-no-files-found: error
+          retention-days: 30
+
+  prod-android:
+    needs: accepted-artifacts
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.accepted-artifacts.outputs.commit }}
+      - uses: subosito/flutter-action@e938fdf56512cc96ef2f93601a5a40bde3801046 # v2.19.0
+        with:
+          flutter-version: '3.44.8'
+          cache: true
+      - name: Inject isolated production signing material
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_PROD_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_PROD_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_PROD_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_PROD_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for value in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            [[ -n "${!value}" ]] || { echo "Missing production signing secret: $value" >&2; exit 1; }
+          done
+          keystore="$RUNNER_TEMP/joysong-prod.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode >"$keystore"
+          chmod 0600 "$keystore"
+          {
+            printf 'storeFile=%s\n' "$keystore"
+            printf 'storePassword=%s\n' "$STORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+          } >joysong-flutter/android/key.prod.properties
+          chmod 0600 joysong-flutter/android/key.prod.properties
+      - name: Build production APK from accepted commit
+        working-directory: joysong-flutter
+        env:
+          PROD_TAG: ${{ inputs.prod_tag }}
+          API_BASE_URL: https://api.joyingsong.net
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          flutter pub get
+          flutter build apk --release --flavor prod \
+            --build-name="${PROD_TAG#v}" \
+            --build-number="$GITHUB_RUN_NUMBER" \
+            --dart-define=APP_ENV=production \
+            --dart-define=API_BASE_URL="$API_BASE_URL"
+          test -f build/app/outputs/flutter-apk/app-prod-release.apk
+      - name: Verify production APK identity, metadata and signing certificate
+        working-directory: joysong-flutter
+        env:
+          API_BASE_URL: https://api.joyingsong.net
+          STORE_PASSWORD: ${{ secrets.ANDROID_PROD_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_PROD_KEY_ALIAS }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export LC_ALL=C
+          apk=build/app/outputs/flutter-apk/app-prod-release.apk
+          [[ "$(apkanalyzer manifest application-id "$apk" | xargs)" == "com.joysong.app" ]]
+          apkanalyzer manifest print "$apk" >"$RUNNER_TEMP/prod-manifest.xml"
+          python3 - "$RUNNER_TEMP/prod-manifest.xml" production "$API_BASE_URL" joysong \
+            "${PROD_TAG#v}" "$GITHUB_RUN_NUMBER" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          manifest_path, expected_env, expected_url, expected_scheme, expected_name, expected_code = sys.argv[1:]
+          android = "{http://schemas.android.com/apk/res/android}"
+          root = ET.parse(manifest_path).getroot()
+          if root.get(android + "versionName") != expected_name:
+              raise SystemExit("APK versionName mismatch")
+          if root.get(android + "versionCode") != expected_code:
+              raise SystemExit("APK versionCode mismatch")
+          application = root.find("application")
+          if application is None:
+              raise SystemExit("APK manifest lacks application")
+          metadata = {
+              item.get(android + "name"): item.get(android + "value")
+              for item in application.findall("meta-data")
+          }
+          expected = {
+              "com.joysong.app.APP_ENV": expected_env,
+              "com.joysong.app.API_BASE_URL": expected_url,
+          }
+          for name, value in expected.items():
+              if metadata.get(name) != value:
+                  raise SystemExit(f"APK metadata mismatch: {name}")
+          schemes = {item.get(android + "scheme") for item in root.findall(".//data")}
+          if expected_scheme not in schemes:
+              raise SystemExit("APK deep-link scheme mismatch")
+          PY
+          apksigner verify --verbose --print-certs "$apk" >"$RUNNER_TEMP/prod-certificate.txt"
+          expected_fingerprint="$(keytool -list -v \
+            -keystore "$RUNNER_TEMP/joysong-prod.jks" \
+            -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" |
+            sed -n 's/^[[:space:]]*SHA256:[[:space:]]*//p' | head -n 1 |
+            tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          actual_fingerprint="$(sed -n \
+            's/^Signer #1 certificate SHA-256 digest:[[:space:]]*//p' \
+            "$RUNNER_TEMP/prod-certificate.txt" | head -n 1 |
+            tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          [[ "$expected_fingerprint" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$actual_fingerprint" == "$expected_fingerprint" ]] || {
+            echo "Production APK signing certificate mismatch" >&2
+            exit 1
+          }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: prod-android
+          path: joysong-flutter/build/app/outputs/flutter-apk/app-prod-release.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove temporary production signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -f joysong-flutter/android/key.prod.properties
+          rm -f "$RUNNER_TEMP/joysong-prod.jks"
+
+  deploy:
+    needs: [accepted-artifacts, prod-android]
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ALIYUN_REGION: ${{ vars.ALIYUN_REGION }}
+      ALIYUN_ECS_INSTANCE_ID: ${{ vars.ALIYUN_ECS_INSTANCE_ID }}
+      ALIYUN_PROD_RDS_INSTANCE_ID: ${{ vars.ALIYUN_PROD_RDS_INSTANCE_ID }}
+      RELEASE_BUCKET: ${{ vars.ALIYUN_RELEASE_BUCKET }}
+      RELEASE_PREFIX: ${{ vars.ALIYUN_RELEASE_PREFIX }}
+      PROD_TAG: ${{ inputs.prod_tag }}
+      UAT_TAG: ${{ inputs.uat_tag }}
+      ACCEPTED_COMMIT: ${{ needs.accepted-artifacts.outputs.commit }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.accepted-artifacts.outputs.commit }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: accepted-server-admin
+          path: accepted
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: prod-android
+          path: accepted
+      - name: Repackage accepted server bytes for production
+        run: |
+          mkdir release
+          python3 joysong-server/deploy/ci/package-release.py \
+            --output release \
+            --environment prod \
+            --tag "$PROD_TAG" \
+            --commit "$ACCEPTED_COMMIT" \
+            --build-number "$GITHUB_RUN_NUMBER" \
+            --api-base-url https://api.joyingsong.net \
+            --admin-base-url https://joyingsong.net \
+            --jar accepted/server.jar \
+            --admin-archive accepted/admin.tar.gz \
+            --apk accepted/app-prod-release.apk \
+            --sbom accepted/sbom.cdx.json \
+            --scan-report accepted/trivy-results.json
+      - name: Scan production artifacts
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          scan-type: fs
+          scan-ref: release
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
+          trivy-version: v0.74.0
+      - name: Acquire short-lived Alibaba Cloud credentials
+        uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6 # v1
+        with:
+          oidc-provider-arn: ${{ vars.ALIYUN_OIDC_PROVIDER_ARN }}
+          role-to-assume: ${{ vars.ALIYUN_OIDC_ROLE_ARN }}
+          role-session-name: joysong-prod-${{ github.run_id }}
+          role-session-expiration: 3600
+          audience: github-actions
+      - name: Install pinned Alibaba Cloud CLI
+        run: bash joysong-server/deploy/ci/install-aliyun-cli.sh
+      - id: production-rds
+        name: Resolve the selected production RDS internal endpoint
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rds_host="$(bash joysong-server/deploy/ci/rds-backup.sh resolve-host)"
+          [[ "$rds_host" =~ ^[a-z0-9][a-z0-9.-]*\.rds\.aliyuncs\.com$ ]]
+          echo "host=$rds_host" >>"$GITHUB_OUTPUT"
+      - name: Bind ECS production configuration to the selected RDS instance
+        env:
+          RDS_CONNECTION_HOST: ${{ steps.production-rds.outputs.host }}
+        run: bash joysong-server/deploy/ci/cloud-assistant.sh preflight prod "$ALIYUN_PROD_RDS_INSTANCE_ID" "$RDS_CONNECTION_HOST"
+      - id: rds-backup
+        name: Complete and record RDS backup before release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          backup_output="$(bash joysong-server/deploy/ci/rds-backup.sh)"
+          printf '%s\n' "$backup_output"
+          backup_id="$(sed -n 's/^RDS_BACKUP_ID=//p' <<<"$backup_output")"
+          [[ "$backup_id" =~ ^[A-Za-z0-9_-]+$ ]]
+          jq -n \
+            --arg environment prod \
+            --arg tag "$PROD_TAG" \
+            --arg commit "$ACCEPTED_COMMIT" \
+            --arg instanceId "$ALIYUN_PROD_RDS_INSTANCE_ID" \
+            --arg backupId "$backup_id" \
+            --arg createdAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "{schemaVersion: 1, environment: \$environment, tag: \$tag, commit: \$commit,
+              rdsInstanceId: \$instanceId, rdsBackupId: \$backupId, createdAt: \$createdAt}" \
+            >release/rds-backup-evidence.json
+          (cd release && sha256sum rds-backup-evidence.json >>SHA256SUMS)
+          echo "backup_id=$backup_id" >>"$GITHUB_OUTPUT"
+          printf "Production RDS backup ID: \`%s\`\n" "$backup_id" >>"$GITHUB_STEP_SUMMARY"
+      - name: Refresh short-lived credentials after the backup gate
+        uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6 # v1
+        with:
+          oidc-provider-arn: ${{ vars.ALIYUN_OIDC_PROVIDER_ARN }}
+          role-to-assume: ${{ vars.ALIYUN_OIDC_ROLE_ARN }}
+          role-session-name: joysong-prod-deploy-${{ github.run_id }}
+          role-session-expiration: 3600
+          audience: github-actions
+      - name: Create stable tag and private draft release
+        env:
+          RDS_BACKUP_ID: ${{ steps.rds-backup.outputs.backup_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/$PROD_TAG" -f sha="$ACCEPTED_COMMIT"
+          cat >"$RUNNER_TEMP/prod-notes.md" <<EOF
+          Production release promoted from accepted UAT \`$UAT_TAG\` at the identical commit \`$ACCEPTED_COMMIT\`.
+          Pre-deploy RDS backup: \`$RDS_BACKUP_ID\` (see \`rds-backup-evidence.json\`).
+          EOF
+          gh release create "$PROD_TAG" release/* --verify-tag --draft \
+            --title "JoySong $PROD_TAG" --notes-file "$RUNNER_TEMP/prod-notes.md"
+      - name: Upload bundle and deploy production
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bundle="release/joysong-ecs-${PROD_TAG}.tar.gz"
+          bash joysong-server/deploy/ci/publish-and-deploy.sh \
+            prod "$PROD_TAG" "$ACCEPTED_COMMIT" "$bundle"
+      - name: Verify public production routes or atomically roll back
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if ! curl --fail --silent --show-error --max-time 15 \
+                 https://api.joyingsong.net/.well-known/joysong-release.json >"$RUNNER_TEMP/prod-api-release.json" ||
+             ! cmp --silent release/release.json "$RUNNER_TEMP/prod-api-release.json" ||
+             ! curl --fail --silent --show-error --max-time 15 \
+                 https://joyingsong.net/.well-known/joysong-release.json >"$RUNNER_TEMP/prod-admin-release.json" ||
+             ! cmp --silent release/release.json "$RUNNER_TEMP/prod-admin-release.json" ||
+             ! curl --fail --silent --show-error --max-time 15 https://api.joyingsong.net/actuator/health >/dev/null ||
+             ! curl --fail --silent --show-error --max-time 15 https://joyingsong.net/ >/dev/null ||
+             ! curl --fail --silent --show-error --max-time 15 https://joyingsong.net/orders >/dev/null; then
+            echo "Public production checks failed; restoring the verified previous release or safely withdrawing a first release." >&2
+            set +e
+            bash joysong-server/deploy/ci/cloud-assistant.sh recover-public-failure prod "$PROD_TAG"
+            rollback_status=$?
+            set -e
+            if ((rollback_status != 0)); then
+              echo "Automatic rollback also failed; immediate operator intervention is required." >&2
+            fi
+            exit 1
+          fi
+      - name: Publish stable GitHub Release
+        run: gh release edit "$PROD_TAG" --draft=false --prerelease=false --latest=true

@@ -16,6 +16,7 @@ import com.joysong.server.payment.provider.PaymentGatewayRegistry
 import com.joysong.server.payment.provider.ProviderRefundResult
 import com.joysong.server.payment.provider.SimulatedAlipayPlusPaymentGateway
 import com.joysong.server.payment.repository.PaymentRepository
+import com.joysong.server.payment.service.DemoPaymentPolicy
 import com.joysong.server.refund.entity.RefundEntity
 import com.joysong.server.refund.entity.RefundItemEntity
 import com.joysong.server.refund.dto.RefundEvidenceFileResponse
@@ -50,6 +51,7 @@ import org.springframework.transaction.support.AbstractPlatformTransactionManage
 import org.springframework.transaction.support.DefaultTransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.mock.web.MockMultipartFile
+import org.springframework.mock.env.MockEnvironment
 import org.springframework.web.multipart.MultipartFile
 import java.nio.file.Files
 import java.nio.file.Path
@@ -333,6 +335,52 @@ class RefundServiceTest {
             refundNotificationDispatcher.orderRefunded(
                 "order-1", "user-1", "consultant-1", "doctor-1"
             )
+        }
+    }
+
+    @Test
+    fun `demo consultation refund stays pending until admin approves the full simulated refund`() {
+        val execution = mockk<RefundExecutionService>()
+        var currentOrder = legacyOrder(status = OrderStatusEnum.CONSULTATION_PAID.value).copy(
+            currency = "USD",
+            paidAmount = BigDecimal("100.00"),
+            paidAmountMinor = 10_000L,
+            consultantId = "consultant-1",
+            doctorId = "doctor-1",
+        )
+        var currentRefund: RefundEntity? = null
+        every { orderRepository.findByIdForUpdate("order-1") } answers { currentOrder }
+        every { refundRepository.findAllByOrderIdAndStatusIn("order-1", any()) } returns emptyList()
+        every { refundRepository.saveAndFlush(any()) } answers {
+            firstArg<RefundEntity>().also { currentRefund = it }
+        }
+        every { refundRepository.findByIdForUpdate(any()) } answers { currentRefund }
+        every { refundRepository.save(any()) } answers {
+            firstArg<RefundEntity>().also { currentRefund = it }
+        }
+        every { orderRepository.save(any()) } answers {
+            firstArg<OrderEntity>().also { currentOrder = it }
+        }
+        every { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
+        every { execution.execute(any()) } returns RefundExecutionOutcome(10_000L, completed = true)
+        val workflow = workflow(demoPaymentPolicy = paymentPolicy("demo", simulatedEnabled = true))
+        val demoService = service(workflow = workflow, execution = execution)
+
+        val pending = demoService.applyRefund("order-1", "user-1", "不再到店", "取消预约")
+
+        assertEquals(RefundWorkflowPersistenceService.PENDING, pending.status)
+        assertEquals(10_000L, pending.requestedAmountMinor)
+        assertEquals(OrderStatusEnum.DISPUTE_MEDIATION.value, currentOrder.status)
+        verify(exactly = 0) { execution.execute(any()) }
+
+        val approved = demoService.adminUpdateStatus(pending.id, "APPROVED", "admin-1")!!
+
+        assertEquals(RefundWorkflowPersistenceService.APPROVED, approved.status)
+        assertEquals(10_000L, approved.refundedAmountMinor)
+        assertEquals(BigDecimal("100.00"), approved.refundAmount)
+        assertEquals(OrderStatusEnum.REFUNDED.value, currentOrder.status)
+        verify(exactly = 1) {
+            execution.execute(match { it.status == RefundWorkflowPersistenceService.PROCESSING })
         }
     }
 
@@ -1224,7 +1272,7 @@ class RefundServiceTest {
     }
 
     @Test
-    fun `legacy consultation refund remains automatic and keeps successful payment allocation`() {
+    fun `development legacy consultation refund remains automatic and keeps successful payment allocation`() {
         val legacyOrder = legacyOrder(status = OrderStatusEnum.CONSULTATION_PAID.value).copy(
             currency = "USD",
             paidAmount = BigDecimal("100.00"),
@@ -1235,7 +1283,7 @@ class RefundServiceTest {
         every { refundRepository.saveAndFlush(any()) } answers { firstArg() }
         every { orderRepository.save(any()) } answers { firstArg() }
 
-        val preparation = workflow().prepareApplication(
+        val preparation = workflow(demoPaymentPolicy = paymentPolicy("dev", simulatedEnabled = true)).prepareApplication(
             "order-1",
             "user-1",
             "不再到店",
@@ -1284,13 +1332,20 @@ class RefundServiceTest {
     private fun workflow(
         dispatcher: RefundBusinessNotificationDispatcher = refundNotificationDispatcher,
         evidence: RefundEvidenceFileService = refundEvidenceFileService,
+        demoPaymentPolicy: DemoPaymentPolicy? = null,
     ) = RefundWorkflowPersistenceService(
         refundRepository,
         orderRepository,
         orderStatusLogService,
         paymentRepository,
         dispatcher,
-        evidence
+        evidence,
+        demoPaymentPolicy,
+    )
+
+    private fun paymentPolicy(profile: String, simulatedEnabled: Boolean) = DemoPaymentPolicy(
+        MockEnvironment().apply { setActiveProfiles(profile) },
+        simulatedEnabled,
     )
 
     private fun transactionalWorkflow(

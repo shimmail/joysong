@@ -11,6 +11,7 @@ import 'package:joysong_flutter/features/orders/presentation/payment_controller.
 import 'package:joysong_flutter/features/orders/presentation/payment_page.dart';
 import 'package:joysong_flutter/features/orders/presentation/review_order_controller.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
+import 'package:joysong_flutter/features/social/presentation/public_upload_controller.dart';
 import 'package:joysong_flutter/features/social/presentation/social_controller.dart';
 
 class OrderDetailPage extends StatefulWidget {
@@ -41,6 +42,8 @@ class OrderDetailPage extends StatefulWidget {
 
 class _OrderDetailPageState extends State<OrderDetailPage> {
   bool _reviewBusy = false;
+  final Set<PublicMediaUploadScope> _publicMediaUploadScopes =
+      <PublicMediaUploadScope>{};
 
   @override
   void initState() {
@@ -48,6 +51,29 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     if (widget.controller.order == null) {
       widget.controller.load();
     }
+  }
+
+  @override
+  void dispose() {
+    for (final scope in _publicMediaUploadScopes) {
+      scope.dispose();
+    }
+    _publicMediaUploadScopes.clear();
+    super.dispose();
+  }
+
+  PublicMediaUploadScope _createPublicMediaUploadScope() {
+    final scope = PublicMediaUploadScope();
+    _publicMediaUploadScopes.add(scope);
+    return scope;
+  }
+
+  Future<void> _closePublicMediaUploadScope(
+    PublicMediaUploadScope scope,
+  ) async {
+    scope.dispose();
+    _publicMediaUploadScopes.remove(scope);
+    await scope.cancelActive();
   }
 
   Future<void> _run(
@@ -85,42 +111,51 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
   Future<void> _requestRefund() async {
     final order = widget.controller.order;
     if (order == null) return;
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => RefundApplyPage(
-          order: order,
-          canUploadLegacyEvidence:
-              !order.isTravelGroundServiceOnly && widget.socialController != null,
-          onPickLegacyEvidence: !order.isTravelGroundServiceOnly
-              ? () => _pickAndUpload(PublicMediaPurpose.review)
-              : null,
-          onPickRefundEvidence: order.isTravelGroundServiceOnly
-              ? () async {
-                  final picked = await widget.filePicker.pickRefundEvidence();
-                  if (picked == null) return null;
-                  return RefundEvidenceDraft(
-                    bytes: picked.bytes,
-                    fileName: picked.fileName,
-                    contentType: picked.mimeType,
-                  );
-                }
-              : null,
-          onSubmit: (draft) => widget.controller.requestRefund(
-            reason: draft.reason,
-            description: draft.description,
-            reasonCode: draft.reasonCode,
-            evidenceUrl: draft.evidenceUrl,
-            evidenceFiles: draft.evidenceFiles,
+    final uploadScope = _createPublicMediaUploadScope();
+    try {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => RefundApplyPage(
+            order: order,
+            canUploadLegacyEvidence: !order.isTravelGroundServiceOnly &&
+                widget.socialController != null,
+            onPickLegacyEvidence: !order.isTravelGroundServiceOnly
+                ? () => _pickAndUpload(
+                      PublicMediaPurpose.review,
+                      uploadScope,
+                    )
+                : null,
+            onPickRefundEvidence: order.isTravelGroundServiceOnly
+                ? () async {
+                    final picked = await widget.filePicker.pickRefundEvidence();
+                    if (picked == null) return null;
+                    return RefundEvidenceDraft(
+                      bytes: picked.bytes,
+                      fileName: picked.fileName,
+                      contentType: picked.mimeType,
+                    );
+                  }
+                : null,
+            onSubmit: (draft) => widget.controller.requestRefund(
+              reason: draft.reason,
+              description: draft.description,
+              reasonCode: draft.reasonCode,
+              evidenceUrl: draft.evidenceUrl,
+              evidenceFiles: draft.evidenceFiles,
+            ),
+            submissionErrorMessage: () => widget.controller.errorMessage,
+            enableAutoTranslation: widget.enableAutoTranslation,
           ),
-          submissionErrorMessage: () => widget.controller.errorMessage,
-          enableAutoTranslation: widget.enableAutoTranslation,
         ),
-      ),
-    );
+      );
+    } finally {
+      await _closePublicMediaUploadScope(uploadScope);
+    }
   }
 
   Future<String?> _pickAndUpload(
-    PublicMediaPurpose purpose, {
+    PublicMediaPurpose purpose,
+    PublicMediaUploadScope uploadScope, {
     bool propagateError = false,
   }) async {
     final uploadImage = widget.uploadImage;
@@ -131,24 +166,35 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       final selected =
           await (widget.pickImage?.call() ?? widget.filePicker.pickImage());
       if (selected == null) return null;
-      final result = await socialController.uploadPublicMedia(
-        PublicMediaDraft(
-          bytes: selected.bytes,
-          fileName: selected.fileName,
-          mimeType: selected.mimeType,
-          purpose: purpose,
-        ),
-      );
-      if (result.succeeded) return result.value;
-      if (propagateError) {
-        throw StateError(result.message ?? 'Image upload failed');
-      }
-      if (mounted) {
-        showTransientMessage(
-          context,
-          result.message ??
-              (_isEnglish(context) ? 'Image upload failed' : '图片上传失败'),
+      try {
+        final localPath = selected.localPath;
+        if (localPath == null) {
+          throw StateError('公共图片缺少本地文件路径');
+        }
+        final result = await socialController.uploadPublicMedia(
+          PublicMediaDraft(
+            uploadId: selected.uploadId,
+            localPath: localPath,
+            byteLength: selected.byteLength,
+            fileName: selected.fileName,
+            mimeType: selected.mimeType,
+            purpose: purpose,
+          ),
+          scope: uploadScope,
         );
+        if (result.succeeded) return result.value;
+        if (propagateError) {
+          throw StateError(result.message ?? 'Image upload failed');
+        }
+        if (mounted) {
+          showTransientMessage(
+            context,
+            result.message ??
+                (_isEnglish(context) ? 'Image upload failed' : '图片上传失败'),
+          );
+        }
+      } finally {
+        await selected.deleteLocalFile();
       }
     } on Object catch (error) {
       if (propagateError) rethrow;
@@ -164,18 +210,25 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     final order = widget.controller.order;
     if (socialController == null || order == null || _reviewBusy) return;
     setState(() => _reviewBusy = true);
-    final draft = await Navigator.of(context).push<ReviewDraft>(
-      MaterialPageRoute(
-        builder: (_) => ReviewOrderPage(
-          order: order,
-          enableAutoTranslation: widget.enableAutoTranslation,
-          onPickImage: () => _pickAndUpload(
-            PublicMediaPurpose.review,
-            propagateError: true,
+    final uploadScope = _createPublicMediaUploadScope();
+    ReviewDraft? draft;
+    try {
+      draft = await Navigator.of(context).push<ReviewDraft>(
+        MaterialPageRoute(
+          builder: (_) => ReviewOrderPage(
+            order: order,
+            enableAutoTranslation: widget.enableAutoTranslation,
+            onPickImage: () => _pickAndUpload(
+              PublicMediaPurpose.review,
+              uploadScope,
+              propagateError: true,
+            ),
           ),
         ),
-      ),
-    );
+      );
+    } finally {
+      await _closePublicMediaUploadScope(uploadScope);
+    }
     if (draft == null || !mounted) {
       if (mounted) setState(() => _reviewBusy = false);
       return;
@@ -210,19 +263,26 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       );
       return;
     }
-    final draft = await Navigator.of(context).push<ReviewDraft>(
-      MaterialPageRoute(
-        builder: (_) => ReviewOrderPage(
-          order: order,
-          initialReview: review,
-          enableAutoTranslation: widget.enableAutoTranslation,
-          onPickImage: () => _pickAndUpload(
-            PublicMediaPurpose.review,
-            propagateError: true,
+    final uploadScope = _createPublicMediaUploadScope();
+    ReviewDraft? draft;
+    try {
+      draft = await Navigator.of(context).push<ReviewDraft>(
+        MaterialPageRoute(
+          builder: (_) => ReviewOrderPage(
+            order: order,
+            initialReview: review,
+            enableAutoTranslation: widget.enableAutoTranslation,
+            onPickImage: () => _pickAndUpload(
+              PublicMediaPurpose.review,
+              uploadScope,
+              propagateError: true,
+            ),
           ),
         ),
-      ),
-    );
+      );
+    } finally {
+      await _closePublicMediaUploadScope(uploadScope);
+    }
     if (!mounted) return;
     if (draft == null) {
       setState(() => _reviewBusy = false);
@@ -1505,7 +1565,8 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
 
   Future<void> _pickRefundEvidence() async {
     final picker = widget.onPickRefundEvidence;
-    if (_busy || picker == null ||
+    if (_busy ||
+        picker == null ||
         _evidenceFiles.length >= RefundEvidenceDraft.maxCount) {
       return;
     }
@@ -1537,7 +1598,8 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
   }
 
   Future<void> _submit(String selectedReason, bool requiresCustomReason) async {
-    if (_busy || selectedReason.isEmpty ||
+    if (_busy ||
+        selectedReason.isEmpty ||
         (requiresCustomReason && _customReason.text.trim().isEmpty)) {
       return;
     }
@@ -1705,7 +1767,8 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
                 IconButton(
                   key: const Key('refund-evidence-add'),
                   tooltip: english ? 'Add evidence' : '添加凭证',
-                  onPressed: _busy || widget.onPickRefundEvidence == null ||
+                  onPressed: _busy ||
+                          widget.onPickRefundEvidence == null ||
                           _evidenceFiles.length >= RefundEvidenceDraft.maxCount
                       ? null
                       : _pickRefundEvidence,
@@ -1820,7 +1883,8 @@ class _RefundEvidencePreview extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(evidence.fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  Text(evidence.fileName,
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 2),
                   Text(
                     '${evidence.contentType} · ${_formattedEvidenceSize(evidence.bytes.length)}',

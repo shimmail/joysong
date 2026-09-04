@@ -544,7 +544,12 @@ Future<IdentityFileDraft?> _pickIdentityFile(IdentityDocumentType type) async {
 
 Future<String?> _pickInstitutionProfileImage() async {
   final selected = await const AppFilePicker().pickImage();
-  return selected?.fileName.trim();
+  if (selected == null) return null;
+  try {
+    return selected.fileName.trim();
+  } finally {
+    await selected.deleteLocalFile();
+  }
 }
 
 class ManagementCenterPage extends StatefulWidget {

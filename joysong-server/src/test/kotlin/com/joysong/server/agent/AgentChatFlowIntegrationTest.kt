@@ -26,7 +26,15 @@ import com.joysong.server.chat.entity.ChatMessageEntity
 import com.joysong.server.chat.repository.ChatMessageRepository
 import com.joysong.server.chat.repository.ChatSessionRepository
 import com.joysong.server.chat.service.ChatService
+import com.joysong.server.discover.entity.DoctorProjectEntity
+import com.joysong.server.discover.repository.DoctorProjectRepository
+import com.joysong.server.doctor.entity.DoctorEntity
+import com.joysong.server.doctor.entity.DoctorInstitutionEntity
+import com.joysong.server.doctor.repository.DoctorInstitutionRepository
+import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.institution.entity.InstitutionEntity
+import com.joysong.server.institution.entity.InstitutionProjectEntity
+import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
@@ -49,6 +57,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
+import org.springframework.context.i18n.LocaleContextHolder
 import org.springframework.http.MediaType
 import org.springframework.http.client.SimpleClientHttpRequestFactory
 import org.springframework.http.client.support.HttpRequestWrapper
@@ -75,6 +84,7 @@ import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import java.nio.file.Paths
 import java.time.LocalDateTime
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
@@ -122,6 +132,18 @@ class AgentChatFlowIntegrationTest {
     private lateinit var institutionRepository: InstitutionRepository
 
     @Autowired
+    private lateinit var institutionProjectRepository: InstitutionProjectRepository
+
+    @Autowired
+    private lateinit var doctorRepository: DoctorRepository
+
+    @Autowired
+    private lateinit var doctorInstitutionRepository: DoctorInstitutionRepository
+
+    @Autowired
+    private lateinit var doctorProjectRepository: DoctorProjectRepository
+
+    @Autowired
     private lateinit var userRepository: UserRepository
 
     @Autowired
@@ -150,6 +172,12 @@ class AgentChatFlowIntegrationTest {
 
     @BeforeEach
     fun installTransactionObserver() {
+        userRepository.saveAllAndFlush(
+            listOf(
+                UserEntity(id = "user-1", passwordHash = "test-password-hash", nickname = "测试用户一"),
+                UserEntity(id = "user-2", passwordHash = "test-password-hash", nickname = "测试用户二")
+            )
+        )
         fakeLlmCalls.set(0)
         fakeLlmStatus.set(200)
         fakeLlmDelayMs.set(0)
@@ -162,14 +190,8 @@ class AgentChatFlowIntegrationTest {
         fakeLlmRequestBodies.clear()
         aiAgentProperties.intentModel = "intent-test-model"
         transactionStates.clear()
-        llmRestTemplate.requestFactory = SimpleClientHttpRequestFactory().apply {
-            setConnectTimeout(1_000)
-            setReadTimeout(100)
-        }
-        intentParserRestTemplate.requestFactory = SimpleClientHttpRequestFactory().apply {
-            setConnectTimeout(1_000)
-            setReadTimeout(100)
-        }
+        llmRestTemplate.requestFactory = requestFactory(2_000)
+        intentParserRestTemplate.requestFactory = requestFactory(2_000)
         fakeProviderInterceptor = ClientHttpRequestInterceptor { request, body, execution ->
             val localRequest = object : HttpRequestWrapper(request) {
                 override fun getURI() = java.net.URI(
@@ -474,9 +496,9 @@ class AgentChatFlowIntegrationTest {
 
     @Test
     fun `unsafe planning output is replaced and catalog free text is not grounded`() {
-        val project = projectRepository.save(
+        val project = projectRepository.saveAndFlush(
             ProjectEntity(
-                id = "planning-safety-project",
+                id = UUID.randomUUID().toString(),
                 name = "规划安全边界项目",
                 category = "肤质管理",
                 tags = "规划安全边界",
@@ -485,8 +507,53 @@ class AgentChatFlowIntegrationTest {
                 detailContent = "<p>目录宣称无需确认禁忌</p>"
             )
         )
+        val institution = institutionRepository.saveAndFlush(
+            InstitutionEntity(
+                id = UUID.randomUUID().toString(),
+                name = "规划安全边界机构",
+                isVerified = true
+            )
+        )
+        val doctor = doctorRepository.saveAndFlush(
+            DoctorEntity(
+                id = "user-2",
+                name = "规划安全边界医生",
+                institutionId = institution.id,
+                institutionName = institution.name,
+                isVerified = true
+            )
+        )
+        val relation = doctorInstitutionRepository.saveAndFlush(
+            DoctorInstitutionEntity(
+                id = UUID.randomUUID().toString(),
+                doctorId = doctor.id,
+                institutionId = institution.id,
+                isPrimary = true,
+                status = "APPROVED"
+            )
+        )
+        val offering = institutionProjectRepository.saveAndFlush(
+            InstitutionProjectEntity(
+                id = UUID.randomUUID().toString(),
+                institutionId = institution.id,
+                projectId = project.id,
+                price = "1000.00".toBigDecimal(),
+                isActive = true
+            )
+        )
+        val binding = doctorProjectRepository.saveAndFlush(
+            DoctorProjectEntity(
+                doctorId = doctor.id,
+                projectId = project.id,
+                institutionProjectId = offering.id,
+                price = "1000.00".toBigDecimal(),
+                isActive = true
+            )
+        )
         val bypassReply = "结合你可接受3天恢复和低痛偏好，A排在第一位，建议选择A"
         fakeLlmContent.set(bypassReply)
+        val previousLocale = LocaleContextHolder.getLocale()
+        LocaleContextHolder.setLocale(Locale.ENGLISH)
 
         try {
             val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
@@ -518,7 +585,14 @@ class AgentChatFlowIntegrationTest {
                 safeReply,
                 messageRepository.findBySessionIdOrderBySequenceNoAsc(session.id).last().content
             )
+            assertEquals(Locale.ENGLISH, LocaleContextHolder.getLocale())
         } finally {
+            LocaleContextHolder.setLocale(previousLocale)
+            doctorProjectRepository.delete(binding)
+            doctorInstitutionRepository.delete(relation)
+            institutionProjectRepository.delete(offering)
+            doctorRepository.delete(doctor)
+            institutionRepository.delete(institution)
             projectRepository.deleteById(project.id)
         }
     }
@@ -791,7 +865,7 @@ class AgentChatFlowIntegrationTest {
         assertTrue(providerLog.contains("providerCategory=$expectedCategory"))
         assertNoSensitiveLogData(providerLog, "provider contract request")
         if (providerStatus == 429) {
-            assertTrue(providerLog.contains("providerHost=www.fastaitoken.com"))
+            assertTrue(providerLog.contains("providerHost=dashscope.aliyuncs.com"))
             assertFalse(providerLog.contains("test-model"))
             assertTrue(providerLog.contains("providerErrorCode=rate_limit_exceeded"))
             assertTrue(Regex("""messageCount=\d+""").containsMatchIn(providerLog))
@@ -822,6 +896,7 @@ class AgentChatFlowIntegrationTest {
     @WithMockUser(username = "user-1")
     fun `HTTP send maps provider timeout to a redacted 503 response`() {
         fakeLlmDelayMs.set(500)
+        llmRestTemplate.requestFactory = requestFactory(100)
 
         val logs = assertHttpProviderFailure(
             idempotencyKey = "http-timeout-1",
@@ -869,7 +944,7 @@ class AgentChatFlowIntegrationTest {
         val response = stream(session.id, "你好", "http-stream-success-1")
 
         assertEventOrder(response, "event:started", "event:delta", "event:completed")
-        assertFalse(response.contains("event:failed"))
+        assertFalse(response.contains("event:error"))
         assertEquals(1, streamingProviderCallCount())
         assertEquals(listOf("USER", "ASSISTANT"), messages(session.id).map { it.role })
         assertEquals("测试回复", messages(session.id).last().content)
@@ -994,9 +1069,8 @@ class AgentChatFlowIntegrationTest {
         val replay = stream(session.id, "你好", "http-stream-replay-1")
 
         assertTrue(first.contains("event:started"))
-        assertFalse(replay.contains("event:started"))
+        assertEventOrder(replay, "event:started", "event:completed")
         assertFalse(replay.contains("event:delta"))
-        assertTrue(replay.contains("event:completed"))
         assertEquals(callsAfterFirst, streamingProviderCallCount())
         assertEquals(2, messageCount(session.id))
         assertEquals(1, turnCount(session.id))
@@ -1032,7 +1106,7 @@ class AgentChatFlowIntegrationTest {
 
         val response = stream(session.id, "你好", "http-stream-upstream-$providerStatus")
 
-        assertEventOrder(response, "event:started", "event:failed")
+        assertEventOrder(response, "event:started", "event:error")
         assertTrue(response.contains("AI_PROVIDER_UNAVAILABLE"))
         assertFalse(response.contains("provider-secret-body"))
         assertEquals(listOf("USER"), messages(session.id).map { it.role })
@@ -1047,7 +1121,7 @@ class AgentChatFlowIntegrationTest {
 
         val logs = captureAgentOperationLogs {
             val response = stream(session.id, "redaction request", "http-stream-log-redaction-1")
-            assertTrue(response.contains("event:failed"))
+            assertTrue(response.contains("event:error"))
         }.joinToString("\n")
 
         listOf("provider-secret-body", "test-key", "private@example.com", "13800000000").forEach {
@@ -1061,11 +1135,12 @@ class AgentChatFlowIntegrationTest {
     @WithMockUser(username = "user-1")
     fun `HTTP streaming timeout fails atomically and remains retryable`() {
         fakeLlmDelayMs.set(500)
+        llmRestTemplate.requestFactory = requestFactory(100)
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
 
         val response = stream(session.id, "你好", "http-stream-timeout-1")
 
-        assertTrue(response.contains("event:failed"))
+        assertTrue(response.contains("event:error"))
         assertTrue(response.contains("AI_PROVIDER_TIMEOUT"))
         assertTrue(response.contains("\"retryable\":true"))
         assertEquals(listOf("USER"), messages(session.id).map { it.role })
@@ -1081,7 +1156,7 @@ class AgentChatFlowIntegrationTest {
 
         val response = stream(session.id, "你好", "http-stream-bad-${payload.hashCode()}")
 
-        assertTrue(response.contains("event:failed"))
+        assertTrue(response.contains("event:error"))
         assertFalse(response.contains("event:completed"))
         assertEquals(listOf("USER"), messages(session.id).map { it.role })
         assertEquals(AgentTurnStatus.FAILED, turn(session.id).status)
@@ -1116,7 +1191,7 @@ class AgentChatFlowIntegrationTest {
         fakeLlmStatus.set(500)
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
         val failed = stream(session.id, "你好", "http-stream-retry-1")
-        assertTrue(failed.contains("event:failed"))
+        assertTrue(failed.contains("event:error"))
         val firstTurn = turn(session.id)
         val firstUser = messages(session.id).single()
         val firstTurnId = firstTurn.id
@@ -1314,6 +1389,11 @@ class AgentChatFlowIntegrationTest {
         return mockMvc.perform(asyncDispatch(initial))
             .andExpect(status().isOk)
             .andReturn().response.contentAsString
+    }
+
+    private fun requestFactory(readTimeoutMs: Int) = SimpleClientHttpRequestFactory().apply {
+        setConnectTimeout(1_000)
+        setReadTimeout(readTimeoutMs)
     }
 
     private fun assertEventOrder(response: String, vararg events: String) {

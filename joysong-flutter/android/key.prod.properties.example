@@ -1,0 +1,6 @@
+# Copy this file to key.prod.properties on the release build machine.
+# Never commit key.prod.properties or the production keystore itself.
+storeFile=D:\\secure\\joysong-prod-release.jks
+storePassword=replace-me
+keyAlias=joysong-prod
+keyPassword=replace-me

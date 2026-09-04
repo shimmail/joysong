@@ -207,7 +207,10 @@ class _JoysongAppState extends State<JoysongApp> {
 
   @override
   Widget build(BuildContext context) {
-    final publicShareToken = _publicDiaryShareToken(_startupRouteName);
+    final publicShareToken = _publicDiaryShareToken(
+      _startupRouteName,
+      deepLinkScheme: widget.environment.deepLinkScheme,
+    );
     return AnimatedBuilder(
       animation: Listenable.merge([
         _themeController,
@@ -238,7 +241,7 @@ class _JoysongAppState extends State<JoysongApp> {
                       ? 'Joysong'
                       : '娇颜颂',
               debugShowCheckedModeBanner:
-                  widget.environment.flavor != AppFlavor.production,
+                  widget.environment.flavor == AppFlavor.development,
               locale: _localeController.language.locale,
               supportedLocales: const [Locale('zh'), Locale('en')],
               localizationsDelegates: const [
@@ -259,10 +262,10 @@ class _JoysongAppState extends State<JoysongApp> {
                       agentConfig: widget.environment.agentConfig,
                       apiClient: _apiClient,
                       accountDeletionRepository: _accountDeletionRepository,
-                      pendingAccountDeletionStore:
-                          _pendingAccountDeletionStore,
-                      allowPreviewData:
-                          widget.environment.flavor != AppFlavor.production,
+                      pendingAccountDeletionStore: _pendingAccountDeletionStore,
+                      allowPreviewData: widget.environment.allowsPreviewData,
+                      passwordOnlyLogin:
+                          widget.environment.usesPasswordOnlyLogin,
                     ),
               onGenerateRoute: (settings) => AppRouter.onGenerateRoute(
                 settings,
@@ -287,7 +290,10 @@ class _JoysongAppState extends State<JoysongApp> {
   }
 }
 
-String? _publicDiaryShareToken(String routeName) {
+String? _publicDiaryShareToken(
+  String routeName, {
+  String deepLinkScheme = 'joysong',
+}) {
   final route = routeName.trim();
   if (route.isEmpty || route == '/') return null;
   final uri = Uri.tryParse(route);
@@ -307,7 +313,7 @@ String? _publicDiaryShareToken(String routeName) {
     final token = segments[2].trim();
     if (token.isNotEmpty) return token;
   }
-  if (uri != null && uri.scheme == 'joysong') {
+  if (uri != null && uri.scheme == deepLinkScheme) {
     final segments = <String>[
       if (uri.host.isNotEmpty) uri.host,
       ...uri.pathSegments.where((segment) => segment.isNotEmpty),

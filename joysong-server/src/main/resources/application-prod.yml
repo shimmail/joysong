@@ -24,6 +24,7 @@ spring:
 oss:
   enabled: true
   endpoint: ${OSS_ENDPOINT}
+  region: ${OSS_REGION}
   bucket-name: ${OSS_BUCKET_NAME}
   public-base-url: ${OSS_PUBLIC_BASE_URL:}
   access-key-id: ${OSS_ACCESS_KEY_ID}
@@ -53,7 +54,6 @@ app:
 
 payment:
   alipay-plus:
-    # Never auto-complete newly created orders in production.
-    auto-pay-on-order-create-enabled: false
-    # Never allow simulated money movement in production.
-    simulated-enabled: false
+    # ConfigValidator rejects startup if either effective value is true.
+    auto-pay-on-order-create-enabled: ${ALIPAY_PLUS_AUTO_PAY_ON_ORDER_CREATE_ENABLED:false}
+    simulated-enabled: ${ALIPAY_PLUS_SIMULATED_ENABLED:false}

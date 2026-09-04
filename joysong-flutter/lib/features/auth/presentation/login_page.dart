@@ -41,6 +41,7 @@ class LoginPage extends StatefulWidget {
     this.initialAutoLogin = false,
     this.initialAgreementsAccepted = false,
     this.initialMode = LoginMode.verificationCode,
+    this.passwordOnly = false,
     this.countryCode = '+86',
     this.verificationCodeCountdown = 60,
     super.key,
@@ -63,6 +64,7 @@ class LoginPage extends StatefulWidget {
   final bool initialAutoLogin;
   final bool initialAgreementsAccepted;
   final LoginMode initialMode;
+  final bool passwordOnly;
   final String countryCode;
   final int verificationCodeCountdown;
 
@@ -116,7 +118,7 @@ class _LoginPageState extends State<LoginPage> {
     _hasAcceptedAgreements = widget.initialAgreementsAccepted;
     _rememberPassword = widget.initialRememberPassword;
     _autoLogin = widget.initialAutoLogin;
-    _mode = widget.initialRememberPassword
+    _mode = widget.passwordOnly || widget.initialRememberPassword
         ? LoginMode.password
         : widget.initialMode;
   }
@@ -394,12 +396,13 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                           ),
                           const SizedBox(height: 36),
-                          _LoginModeSelector(
-                            mode: _mode,
-                            enabled: !_isBusy,
-                            onChanged: _changeMode,
-                            strings: strings,
-                          ),
+                          if (!widget.passwordOnly)
+                            _LoginModeSelector(
+                              mode: _mode,
+                              enabled: !_isBusy,
+                              onChanged: _changeMode,
+                              strings: strings,
+                            ),
                           const SizedBox(height: 12),
                           Text(
                             _mode == LoginMode.password
@@ -494,13 +497,15 @@ class _LoginPageState extends State<LoginPage> {
                                   enabled: !_isBusy,
                                   onChanged: _setAutoLogin,
                                 ),
-                                TextButton(
-                                  key: const Key('forgot-password-button'),
-                                  onPressed:
-                                      _isBusy ? null : widget.onForgotPassword,
-                                  style: _compactTextButtonStyle(),
-                                  child: Text(strings.forgotPassword),
-                                ),
+                                if (!widget.passwordOnly)
+                                  TextButton(
+                                    key: const Key('forgot-password-button'),
+                                    onPressed: _isBusy
+                                        ? null
+                                        : widget.onForgotPassword,
+                                    style: _compactTextButtonStyle(),
+                                    child: Text(strings.forgotPassword),
+                                  ),
                               ],
                             ),
                           ] else ...[
@@ -609,7 +614,8 @@ class _LoginPageState extends State<LoginPage> {
                                   : Text(strings.login),
                             ),
                           ),
-                          if (widget.onGoogleLogin != null) ...[
+                          if (!widget.passwordOnly &&
+                              widget.onGoogleLogin != null) ...[
                             const SizedBox(height: 18),
                             Row(
                               children: [
@@ -644,24 +650,26 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                             ),
                           ],
-                          const SizedBox(height: 14),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                strings.noAccount,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: colors.onSurfaceVariant,
+                          if (!widget.passwordOnly) ...[
+                            const SizedBox(height: 14),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  strings.noAccount,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: colors.onSurfaceVariant,
+                                  ),
                                 ),
-                              ),
-                              TextButton(
-                                key: const Key('register-button'),
-                                onPressed: _isBusy ? null : widget.onRegister,
-                                style: _compactTextButtonStyle(),
-                                child: Text(strings.registerNow),
-                              ),
-                            ],
-                          ),
+                                TextButton(
+                                  key: const Key('register-button'),
+                                  onPressed: _isBusy ? null : widget.onRegister,
+                                  style: _compactTextButtonStyle(),
+                                  child: Text(strings.registerNow),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     ),

@@ -1,0 +1,450 @@
+name: UAT candidate
+
+on:
+  push:
+    tags:
+      - 'v*.*.*-uat.*'
+
+permissions: {}
+
+concurrency:
+  group: uat-deployment
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Validate immutable candidate identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .visibility)" == "private" ]] || {
+            echo "UAT releases contain private delivery artifacts and require a private GitHub repository" >&2
+            exit 1
+          }
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-uat\.[0-9]+$ ]]
+          git fetch origin master --no-tags
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/master
+          quality_conclusion="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
+            --jq '[.check_runs[] | select(.name == "Required quality gates")] | sort_by(.completed_at) | last | .conclusion // ""')"
+          [[ "$quality_conclusion" == "success" ]] || {
+            echo "The exact candidate commit lacks a successful Required quality gates check" >&2
+            exit 1
+          }
+          mapfile -t pending_tags < <(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq \
+            '.[] | select(.draft == true) | .tag_name')
+          latest_pending="$(printf '%s\n' "$TAG" "${pending_tags[@]}" |
+            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-uat\.[0-9]+$' | sort -V | tail -n 1)"
+          [[ "$latest_pending" == "$TAG" ]] || {
+            echo "A newer pending UAT candidate already exists: $latest_pending" >&2
+            exit 1
+          }
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "A GitHub Release already exists for immutable tag $TAG" >&2
+            exit 1
+          fi
+
+  server-admin:
+    needs: preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}/joysong-server/gradle/wrapper/gradle-wrapper.properties
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}/joysong-admin/package-lock.json
+      - name: Test and build backend
+        working-directory: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}/joysong-server
+        run: |
+          set -Eeuo pipefail
+          repository_root="$(git rev-parse --show-toplevel)"
+          worktree_id="$(basename "$repository_root")"
+          [[ "$worktree_id" == worktree_* ]]
+          database_name="myapp_${worktree_id}"
+          echo "Migration/test database host: Testcontainers isolated MySQL"
+          echo "Migration/test database name: $database_name"
+          chmod +x gradlew
+          ./gradlew test mysqlIntegrationTest bootJar --no-daemon
+          mkdir -p "$RUNNER_TEMP/release-input"
+          cp build/libs/*.jar "$RUNNER_TEMP/release-input/server.jar"
+      - name: Test and build admin
+        working-directory: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}/joysong-admin
+        run: |
+          npm ci
+          npm run lint
+          npm test
+          npm run build
+          cp -R dist "$RUNNER_TEMP/release-input/admin"
+      - name: Block high and critical vulnerabilities or secrets
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          scan-type: fs
+          scan-ref: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
+          format: json
+          output: trivy-results.json
+          trivy-version: v0.74.0
+      - name: Generate CycloneDX SBOM
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          scan-type: fs
+          scan-ref: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}
+          format: cyclonedx
+          output: sbom.cdx.json
+          exit-code: '0'
+          trivy-version: v0.74.0
+      - name: Stage scan evidence and SBOM
+        run: |
+          cp sbom.cdx.json "$RUNNER_TEMP/release-input/sbom.cdx.json"
+          cp trivy-results.json "$RUNNER_TEMP/release-input/trivy-results.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: uat-server-admin
+          path: ${{ runner.temp }}/release-input
+          if-no-files-found: error
+          retention-days: 30
+
+  android:
+    needs: preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: subosito/flutter-action@e938fdf56512cc96ef2f93601a5a40bde3801046 # v2.19.0
+        with:
+          flutter-version: '3.44.8'
+          cache: true
+      - name: Inject isolated UAT signing material
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_UAT_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_UAT_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_UAT_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_UAT_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for value in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            [[ -n "${!value}" ]] || { echo "Missing UAT signing secret: $value" >&2; exit 1; }
+          done
+          keystore="$RUNNER_TEMP/joysong-uat.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode >"$keystore"
+          chmod 0600 "$keystore"
+          {
+            printf 'storeFile=%s\n' "$keystore"
+            printf 'storePassword=%s\n' "$STORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+          } >joysong-flutter/android/key.uat.properties
+          chmod 0600 joysong-flutter/android/key.uat.properties
+      - name: Analyze, test and build signed universal APK
+        working-directory: joysong-flutter
+        env:
+          API_BASE_URL: ${{ vars.UAT_API_BASE_URL }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$API_BASE_URL" == "https://api.joyingsong.net" ||
+             "$API_BASE_URL" == "https://api-uat.joyingsong.net" ]] || {
+            echo "UAT_API_BASE_URL must be an approved exact HTTPS origin" >&2
+            exit 1
+          }
+          flutter pub get
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze
+          flutter test
+          flutter build apk --release --flavor uat \
+            --build-name="${GITHUB_REF_NAME#v}" \
+            --build-number="$GITHUB_RUN_NUMBER" \
+            --dart-define=APP_ENV=uat \
+            --dart-define=API_BASE_URL="$API_BASE_URL"
+          test -f build/app/outputs/flutter-apk/app-uat-release.apk
+      - name: Verify UAT APK identity, metadata and signing certificate
+        working-directory: joysong-flutter
+        env:
+          API_BASE_URL: ${{ vars.UAT_API_BASE_URL }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_UAT_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_UAT_KEY_ALIAS }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export LC_ALL=C
+          apk=build/app/outputs/flutter-apk/app-uat-release.apk
+          [[ "$(apkanalyzer manifest application-id "$apk" | xargs)" == "com.joysong.app.uat" ]]
+          apkanalyzer manifest print "$apk" >"$RUNNER_TEMP/uat-manifest.xml"
+          python3 - "$RUNNER_TEMP/uat-manifest.xml" uat "$API_BASE_URL" joysong-uat \
+            "${GITHUB_REF_NAME#v}" "$GITHUB_RUN_NUMBER" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          manifest_path, expected_env, expected_url, expected_scheme, expected_name, expected_code = sys.argv[1:]
+          android = "{http://schemas.android.com/apk/res/android}"
+          root = ET.parse(manifest_path).getroot()
+          if root.get(android + "versionName") != expected_name:
+              raise SystemExit("APK versionName mismatch")
+          if root.get(android + "versionCode") != expected_code:
+              raise SystemExit("APK versionCode mismatch")
+          application = root.find("application")
+          if application is None:
+              raise SystemExit("APK manifest lacks application")
+          metadata = {
+              item.get(android + "name"): item.get(android + "value")
+              for item in application.findall("meta-data")
+          }
+          expected = {
+              "com.joysong.app.APP_ENV": expected_env,
+              "com.joysong.app.API_BASE_URL": expected_url,
+          }
+          for name, value in expected.items():
+              if metadata.get(name) != value:
+                  raise SystemExit(f"APK metadata mismatch: {name}")
+          schemes = {item.get(android + "scheme") for item in root.findall(".//data")}
+          if expected_scheme not in schemes:
+              raise SystemExit("APK deep-link scheme mismatch")
+          PY
+          apksigner verify --verbose --print-certs "$apk" >"$RUNNER_TEMP/uat-certificate.txt"
+          expected_fingerprint="$(keytool -list -v \
+            -keystore "$RUNNER_TEMP/joysong-uat.jks" \
+            -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" |
+            sed -n 's/^[[:space:]]*SHA256:[[:space:]]*//p' | head -n 1 |
+            tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          actual_fingerprint="$(sed -n \
+            's/^Signer #1 certificate SHA-256 digest:[[:space:]]*//p' \
+            "$RUNNER_TEMP/uat-certificate.txt" | head -n 1 |
+            tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          [[ "$expected_fingerprint" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$actual_fingerprint" == "$expected_fingerprint" ]] || {
+            echo "UAT APK signing certificate mismatch" >&2
+            exit 1
+          }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: uat-android
+          path: joysong-flutter/build/app/outputs/flutter-apk/app-uat-release.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove temporary UAT signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -f joysong-flutter/android/key.uat.properties
+          rm -f "$RUNNER_TEMP/joysong-uat.jks"
+
+  ios-unsigned:
+    needs: preflight
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: subosito/flutter-action@e938fdf56512cc96ef2f93601a5a40bde3801046 # v2.19.0
+        with:
+          flutter-version: '3.44.8'
+          cache: true
+      - name: Compile unsigned iOS UAT app
+        working-directory: joysong-flutter
+        env:
+          API_BASE_URL: ${{ vars.UAT_API_BASE_URL }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$API_BASE_URL" == "https://api.joyingsong.net" ||
+             "$API_BASE_URL" == "https://api-uat.joyingsong.net" ]] || {
+            echo "UAT_API_BASE_URL must be an approved exact HTTPS origin" >&2
+            exit 1
+          }
+          flutter pub get
+          flutter build ios --no-codesign \
+            --dart-define=APP_ENV=uat \
+            --dart-define=API_BASE_URL="$API_BASE_URL"
+
+  publish-deploy:
+    needs: [preflight, server-admin, android, ios-unsigned]
+    runs-on: ubuntu-latest
+    environment: uat
+    permissions:
+      contents: write
+      issues: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ALIYUN_REGION: ${{ vars.ALIYUN_REGION }}
+      ALIYUN_ECS_INSTANCE_ID: ${{ vars.ALIYUN_ECS_INSTANCE_ID }}
+      RELEASE_BUCKET: ${{ vars.ALIYUN_RELEASE_BUCKET }}
+      RELEASE_PREFIX: ${{ vars.ALIYUN_RELEASE_PREFIX }}
+      UAT_API_BASE_URL: ${{ vars.UAT_API_BASE_URL }}
+      UAT_ADMIN_BASE_URL: ${{ vars.UAT_ADMIN_BASE_URL }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: uat-server-admin
+          path: input
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: uat-android
+          path: input
+      - name: Assemble immutable release
+        id: release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir release
+          python3 joysong-server/deploy/ci/package-release.py \
+            --output release \
+            --environment uat \
+            --tag "$GITHUB_REF_NAME" \
+            --commit "$GITHUB_SHA" \
+            --build-number "$GITHUB_RUN_NUMBER" \
+            --api-base-url "$UAT_API_BASE_URL" \
+            --admin-base-url "$UAT_ADMIN_BASE_URL" \
+            --jar input/server.jar \
+            --admin-dir input/admin \
+            --apk input/app-uat-release.apk \
+            --sbom input/sbom.cdx.json \
+            --scan-report input/trivy-results.json
+          echo "manifest_sha=$(sha256sum release/manifest.json | awk '{print $1}')" >>"$GITHUB_OUTPUT"
+      - name: Scan assembled artifacts
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          scan-type: fs
+          scan-ref: release
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
+          trivy-version: v0.74.0
+      - name: Create private draft release
+        shell: bash
+        run: |
+          cat >"$RUNNER_TEMP/release-notes.md" <<EOF
+          UAT candidate built from commit \`$GITHUB_SHA\`.
+
+          This release remains private as a draft until technical deployment and manual acceptance complete.
+          EOF
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --verify-tag --draft --title "JoySong $GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
+      - name: Acquire short-lived Alibaba Cloud credentials
+        uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6 # v1
+        with:
+          oidc-provider-arn: ${{ vars.ALIYUN_OIDC_PROVIDER_ARN }}
+          role-to-assume: ${{ vars.ALIYUN_OIDC_ROLE_ARN }}
+          role-session-name: joysong-uat-${{ github.run_id }}
+          role-session-expiration: 3600
+          audience: github-actions
+      - name: Install pinned Alibaba Cloud CLI
+        run: bash joysong-server/deploy/ci/install-aliyun-cli.sh
+      - name: Upload bundle and deploy existing ECS UAT
+        id: deploy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bundle="release/joysong-ecs-${GITHUB_REF_NAME}.tar.gz"
+          bash joysong-server/deploy/ci/publish-and-deploy.sh \
+            uat "$GITHUB_REF_NAME" "$GITHUB_SHA" "$bundle"
+      - name: Verify public UAT routes or atomically roll back
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - "$UAT_API_BASE_URL" "$UAT_ADMIN_BASE_URL" <<'PY'
+          import sys
+          from urllib.parse import urlsplit
+
+          api, admin = map(urlsplit, sys.argv[1:])
+          allowed = {
+              ("api.joyingsong.net", "joyingsong.net"),
+              ("api-uat.joyingsong.net", "uat.joyingsong.net"),
+          }
+          if ((api.hostname, admin.hostname) not in allowed or
+                  api.scheme != "https" or admin.scheme != "https" or
+                  api.port not in (None, 443) or admin.port not in (None, 443) or
+                  api.path not in ("", "/") or admin.path not in ("", "/") or
+                  api.username or api.password or admin.username or admin.password or
+                  api.query or api.fragment or admin.query or admin.fragment):
+              raise SystemExit("UAT URLs must be one approved API/Admin HTTPS origin pair")
+          PY
+          api_base="${UAT_API_BASE_URL%/}"
+          admin_base="${UAT_ADMIN_BASE_URL%/}"
+          if ! curl --fail --silent --show-error --max-time 15 \
+                 "$api_base/.well-known/joysong-release.json" >"$RUNNER_TEMP/api-release.json" ||
+             ! cmp --silent release/release.json "$RUNNER_TEMP/api-release.json" ||
+             ! curl --fail --silent --show-error --max-time 15 \
+                 "$admin_base/.well-known/joysong-release.json" >"$RUNNER_TEMP/admin-release.json" ||
+             ! cmp --silent release/release.json "$RUNNER_TEMP/admin-release.json" ||
+             ! curl --fail --silent --show-error --max-time 15 "$api_base/actuator/health" >/dev/null ||
+             ! curl --fail --silent --show-error --max-time 15 "$admin_base/" >/dev/null ||
+             ! curl --fail --silent --show-error --max-time 15 "$admin_base/orders" >/dev/null; then
+            echo "Public UAT checks failed; restoring the verified previous release." >&2
+            set +e
+            bash joysong-server/deploy/ci/cloud-assistant.sh recover-public-failure uat "$GITHUB_REF_NAME"
+            rollback_status=$?
+            set -e
+            if ((rollback_status != 0)); then
+              echo "Automatic rollback also failed; immediate operator intervention is required." >&2
+            fi
+            exit 1
+          fi
+      - name: Open manual acceptance issue
+        id: issue
+        env:
+          MANIFEST_SHA: ${{ steps.release.outputs.manifest_sha }}
+        shell: bash
+        run: |
+          gh label create uat-awaiting-acceptance --color D4C5F9 --force
+          gh label create uat-accepted --color 0E8A16 --force
+          cat >"$RUNNER_TEMP/acceptance.md" <<EOF
+          <!-- joysong-acceptance-schema:1 -->
+          <!-- joysong-uat-tag:$GITHUB_REF_NAME -->
+          <!-- joysong-commit:$GITHUB_SHA -->
+          <!-- joysong-manifest-sha:$MANIFEST_SHA -->
+          ## UAT 业务验收
+
+          - [ ] 使用既有测试账号完成密码登录
+          - [ ] 虚构机构、医生、项目和内容正常
+          - [ ] AI 对话与翻译正常
+          - [ ] OSS 图片上传与读取正常
+          - [ ] 用户手动点击后模拟支付立即成功
+          - [ ] 用户提交全额退款，管理员批准后模拟退款成功
+          - [ ] 使用上一 UAT 版本覆盖安装 APK，数据保留
+
+          全部通过后：移除 \`uat-awaiting-acceptance\`，添加 \`uat-accepted\` 并关闭 Issue。
+          EOF
+          issue_url="$(gh issue create \
+            --title "UAT 验收：$GITHUB_REF_NAME" \
+            --label uat-awaiting-acceptance \
+            --body-file "$RUNNER_TEMP/acceptance.md")"
+          echo "url=$issue_url" >>"$GITHUB_OUTPUT"
+      - name: Link acceptance evidence to draft release
+        env:
+          ISSUE_URL: ${{ steps.issue.outputs.url }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" --json body --jq .body >"$RUNNER_TEMP/release-notes.md"
+          printf '\nManual acceptance: %s\n' "$ISSUE_URL" >>"$RUNNER_TEMP/release-notes.md"
+          gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/release-notes.md"

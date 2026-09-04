@@ -1,0 +1,2789 @@
+{
+  "schemaVersion": 1,
+  "datasetVersion": "2026.09.02.1",
+  "namespace": "demo-cn-v1",
+  "sharedContent": {
+    "account": {
+      "bio": "本账号及其资料均为全虚构隔离演示数据，不对应任何真实个人。",
+      "supervisorDisplayName": "隔离演示主管"
+    },
+    "identity": {
+      "documentOriginalName": "虚构身份占位材料.png",
+      "reviewNotes": {
+        "INSTITUTION_LEGAL_REPRESENTATIVE": "虚构演示法人身份资料审核通过。",
+        "DOCTOR": "虚构演示医生身份资料审核通过。",
+        "CONSULTANT": "虚构演示顾问身份资料审核通过。"
+      }
+    },
+    "institution": {
+      "coverImage": "",
+      "images": "",
+      "rating": 0,
+      "reviewCount": 0,
+      "isVerified": true,
+      "consultationCount": 0,
+      "userCount": 0,
+      "caseCount": 0,
+      "credentials": "虚构演示机构资质",
+      "credentialImages": "",
+      "specialties": "虚构演示医美服务",
+      "tags": "全虚构演示机构",
+      "businessHours": "虚构演示时段"
+    },
+    "doctor": {
+      "avatar": "",
+      "contactPhone": "",
+      "rating": 0,
+      "reviewCount": 0,
+      "isVerified": true,
+      "consultationCount": 0,
+      "credentials": "虚构演示执业资质",
+      "credentialImages": "",
+      "caseCount": 0,
+      "certificationTags": "全虚构演示医生认证"
+    },
+    "membership": {
+      "legalRequestNote": "虚构演示法人关系申请。",
+      "legalReviewNote": "虚构演示法人关系审核通过。",
+      "doctorPracticeRequestNote": "虚构演示医生执业关系申请。",
+      "doctorPracticeReviewNote": "虚构演示医生执业关系审核通过。",
+      "consultantRequestNote": "虚构演示顾问关系申请。",
+      "consultantReviewNote": "虚构演示顾问关系审核通过。"
+    },
+    "project": {
+      "coverImage": "",
+      "images": "",
+      "rating": 0
+    },
+    "institutionProject": {
+      "coverImage": "",
+      "images": "",
+      "rating": 0
+    },
+    "projectRequest": {
+      "coverImage": "",
+      "images": [],
+      "salesCount": 0
+    },
+    "doctorProjectWorkflow": {
+      "joinNote": "虚构演示医生项目绑定申请。",
+      "joinReviewNote": "虚构演示医生项目绑定审核通过。",
+      "suspensionNote": "虚构演示医生项目服务暂停申请。",
+      "suspensionReviewNote": "虚构演示医生项目服务暂停审核通过。"
+    }
+  },
+  "accounts": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "code": "ACCOUNT-LEGAL-01",
+      "phone": "+8613900090001",
+      "roleCode": "INSTITUTION_LEGAL_REPRESENTATIVE",
+      "displayName": "上海演示法人甲",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000001",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "上海演示法人甲",
+        "idNumber": "DEMOLEGAL000001",
+        "institutionName": "上海澄光医疗美容演示中心",
+        "businessLicenseNo": "DEMOLICENSE000001",
+        "region": "上海",
+        "address": "上海市演示新区澄光路一号"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-LEGAL-01-LICENSE",
+          "fileId": "30000000-0000-4000-8000-000000000001",
+          "documentType": "BUSINESS_LICENSE"
+        },
+        {
+          "code": "DOC-LEGAL-01-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000002",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-LEGAL-01-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000003",
+          "documentType": "ID_CARD_BACK"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "code": "ACCOUNT-LEGAL-02",
+      "phone": "+8613900090002",
+      "roleCode": "INSTITUTION_LEGAL_REPRESENTATIVE",
+      "displayName": "北京演示法人甲",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000002",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "北京演示法人甲",
+        "idNumber": "DEMOLEGAL000002",
+        "institutionName": "北京和悦医疗美容演示中心",
+        "businessLicenseNo": "DEMOLICENSE000002",
+        "region": "北京",
+        "address": "北京市演示新区和悦街三号"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-LEGAL-02-LICENSE",
+          "fileId": "30000000-0000-4000-8000-000000000004",
+          "documentType": "BUSINESS_LICENSE"
+        },
+        {
+          "code": "DOC-LEGAL-02-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000005",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-LEGAL-02-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000006",
+          "documentType": "ID_CARD_BACK"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000003",
+      "code": "ACCOUNT-LEGAL-03",
+      "phone": "+8613900090003",
+      "roleCode": "INSTITUTION_LEGAL_REPRESENTATIVE",
+      "displayName": "深圳演示法人甲",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000003",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "深圳演示法人甲",
+        "idNumber": "DEMOLEGAL000003",
+        "institutionName": "深圳青岚轻医美演示中心",
+        "businessLicenseNo": "DEMOLICENSE000003",
+        "region": "深圳",
+        "address": "深圳市演示新区青岚路五号"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-LEGAL-03-LICENSE",
+          "fileId": "30000000-0000-4000-8000-000000000007",
+          "documentType": "BUSINESS_LICENSE"
+        },
+        {
+          "code": "DOC-LEGAL-03-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000008",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-LEGAL-03-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000009",
+          "documentType": "ID_CARD_BACK"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000004",
+      "code": "ACCOUNT-LEGAL-04",
+      "phone": "+8613900090004",
+      "roleCode": "INSTITUTION_LEGAL_REPRESENTATIVE",
+      "displayName": "成都演示法人甲",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000004",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "成都演示法人甲",
+        "idNumber": "DEMOLEGAL000004",
+        "institutionName": "成都云舒医疗美容演示门诊",
+        "businessLicenseNo": "DEMOLICENSE000004",
+        "region": "成都",
+        "address": "成都市演示新区云舒路六号"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-LEGAL-04-LICENSE",
+          "fileId": "30000000-0000-4000-8000-000000000010",
+          "documentType": "BUSINESS_LICENSE"
+        },
+        {
+          "code": "DOC-LEGAL-04-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000011",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-LEGAL-04-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000012",
+          "documentType": "ID_CARD_BACK"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000005",
+      "code": "ACCOUNT-DOCTOR-SH-01",
+      "phone": "+8613900090005",
+      "roleCode": "DOCTOR",
+      "displayName": "澄光演示医生甲",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000005",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "澄光演示医生甲",
+        "idNumber": "DEMODOCTOR000001",
+        "department": "皮肤管理演示科",
+        "title": "演示主诊医师",
+        "qualificationNo": "DEMOQUAL000001",
+        "practiceNo": "DEMOPRACTICE000001",
+        "reason": "用于虚构医生身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-DOCTOR-SH-01-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000013",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-01-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000014",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-01-HAND",
+          "fileId": "30000000-0000-4000-8000-000000000015",
+          "documentType": "ID_CARD_HANDHELD"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-01-QUAL",
+          "fileId": "30000000-0000-4000-8000-000000000016",
+          "documentType": "DOCTOR_QUALIFICATION"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-01-PRACTICE",
+          "fileId": "30000000-0000-4000-8000-000000000017",
+          "documentType": "DOCTOR_PRACTICE_CERTIFICATE"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000006",
+      "code": "ACCOUNT-DOCTOR-SH-02",
+      "phone": "+8613900090006",
+      "roleCode": "DOCTOR",
+      "displayName": "澄光演示医生乙",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000006",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "澄光演示医生乙",
+        "idNumber": "DEMODOCTOR000002",
+        "department": "抗衰管理演示科",
+        "title": "演示执业医师",
+        "qualificationNo": "DEMOQUAL000002",
+        "practiceNo": "DEMOPRACTICE000002",
+        "reason": "用于虚构医生身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-DOCTOR-SH-02-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000018",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-02-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000019",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-02-HAND",
+          "fileId": "30000000-0000-4000-8000-000000000020",
+          "documentType": "ID_CARD_HANDHELD"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-02-QUAL",
+          "fileId": "30000000-0000-4000-8000-000000000021",
+          "documentType": "DOCTOR_QUALIFICATION"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-02-PRACTICE",
+          "fileId": "30000000-0000-4000-8000-000000000022",
+          "documentType": "DOCTOR_PRACTICE_CERTIFICATE"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000007",
+      "code": "ACCOUNT-DOCTOR-SH-03",
+      "phone": "+8613900090007",
+      "roleCode": "DOCTOR",
+      "displayName": "栖颜演示医生甲",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000007",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "栖颜演示医生甲",
+        "idNumber": "DEMODOCTOR000003",
+        "department": "皮肤修护演示科",
+        "title": "演示主诊医师",
+        "qualificationNo": "DEMOQUAL000003",
+        "practiceNo": "DEMOPRACTICE000003",
+        "reason": "用于虚构医生身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-DOCTOR-SH-03-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000023",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-03-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000024",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-03-HAND",
+          "fileId": "30000000-0000-4000-8000-000000000025",
+          "documentType": "ID_CARD_HANDHELD"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-03-QUAL",
+          "fileId": "30000000-0000-4000-8000-000000000026",
+          "documentType": "DOCTOR_QUALIFICATION"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-03-PRACTICE",
+          "fileId": "30000000-0000-4000-8000-000000000027",
+          "documentType": "DOCTOR_PRACTICE_CERTIFICATE"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000008",
+      "code": "ACCOUNT-DOCTOR-SH-04",
+      "phone": "+8613900090008",
+      "roleCode": "DOCTOR",
+      "displayName": "栖颜演示医生乙",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000008",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "栖颜演示医生乙",
+        "idNumber": "DEMODOCTOR000004",
+        "department": "眼周管理演示科",
+        "title": "演示执业医师",
+        "qualificationNo": "DEMOQUAL000004",
+        "practiceNo": "DEMOPRACTICE000004",
+        "reason": "用于虚构医生身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-DOCTOR-SH-04-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000028",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-04-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000029",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-04-HAND",
+          "fileId": "30000000-0000-4000-8000-000000000030",
+          "documentType": "ID_CARD_HANDHELD"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-04-QUAL",
+          "fileId": "30000000-0000-4000-8000-000000000031",
+          "documentType": "DOCTOR_QUALIFICATION"
+        },
+        {
+          "code": "DOC-DOCTOR-SH-04-PRACTICE",
+          "fileId": "30000000-0000-4000-8000-000000000032",
+          "documentType": "DOCTOR_PRACTICE_CERTIFICATE"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000009",
+      "code": "ACCOUNT-DOCTOR-BJ-01",
+      "phone": "+8613900090009",
+      "roleCode": "DOCTOR",
+      "displayName": "和悦演示医生甲",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000009",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "和悦演示医生甲",
+        "idNumber": "DEMODOCTOR000005",
+        "department": "眼部管理演示科",
+        "title": "演示主诊医师",
+        "qualificationNo": "DEMOQUAL000005",
+        "practiceNo": "DEMOPRACTICE000005",
+        "reason": "用于虚构医生身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-DOCTOR-BJ-01-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000033",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-01-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000034",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-01-HAND",
+          "fileId": "30000000-0000-4000-8000-000000000035",
+          "documentType": "ID_CARD_HANDHELD"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-01-QUAL",
+          "fileId": "30000000-0000-4000-8000-000000000036",
+          "documentType": "DOCTOR_QUALIFICATION"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-01-PRACTICE",
+          "fileId": "30000000-0000-4000-8000-000000000037",
+          "documentType": "DOCTOR_PRACTICE_CERTIFICATE"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000010",
+      "code": "ACCOUNT-DOCTOR-BJ-02",
+      "phone": "+8613900090010",
+      "roleCode": "DOCTOR",
+      "displayName": "和悦演示医生乙",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000010",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "和悦演示医生乙",
+        "idNumber": "DEMODOCTOR000006",
+        "department": "注射管理演示科",
+        "title": "演示执业医师",
+        "qualificationNo": "DEMOQUAL000006",
+        "practiceNo": "DEMOPRACTICE000006",
+        "reason": "用于虚构医生身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-DOCTOR-BJ-02-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000038",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-02-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000039",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-02-HAND",
+          "fileId": "30000000-0000-4000-8000-000000000040",
+          "documentType": "ID_CARD_HANDHELD"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-02-QUAL",
+          "fileId": "30000000-0000-4000-8000-000000000041",
+          "documentType": "DOCTOR_QUALIFICATION"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-02-PRACTICE",
+          "fileId": "30000000-0000-4000-8000-000000000042",
+          "documentType": "DOCTOR_PRACTICE_CERTIFICATE"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000011",
+      "code": "ACCOUNT-DOCTOR-BJ-03",
+      "phone": "+8613900090011",
+      "roleCode": "DOCTOR",
+      "displayName": "臻序演示医生甲",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000011",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "臻序演示医生甲",
+        "idNumber": "DEMODOCTOR000007",
+        "department": "眼鼻管理演示科",
+        "title": "演示主诊医师",
+        "qualificationNo": "DEMOQUAL000007",
+        "practiceNo": "DEMOPRACTICE000007",
+        "reason": "用于虚构医生身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-DOCTOR-BJ-03-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000043",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-03-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000044",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-03-HAND",
+          "fileId": "30000000-0000-4000-8000-000000000045",
+          "documentType": "ID_CARD_HANDHELD"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-03-QUAL",
+          "fileId": "30000000-0000-4000-8000-000000000046",
+          "documentType": "DOCTOR_QUALIFICATION"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-03-PRACTICE",
+          "fileId": "30000000-0000-4000-8000-000000000047",
+          "documentType": "DOCTOR_PRACTICE_CERTIFICATE"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000012",
+      "code": "ACCOUNT-DOCTOR-BJ-04",
+      "phone": "+8613900090012",
+      "roleCode": "DOCTOR",
+      "displayName": "臻序演示医生乙",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000012",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "臻序演示医生乙",
+        "idNumber": "DEMODOCTOR000008",
+        "department": "年轻化演示科",
+        "title": "演示执业医师",
+        "qualificationNo": "DEMOQUAL000008",
+        "practiceNo": "DEMOPRACTICE000008",
+        "reason": "用于虚构医生身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-DOCTOR-BJ-04-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000048",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-04-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000049",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-04-HAND",
+          "fileId": "30000000-0000-4000-8000-000000000050",
+          "documentType": "ID_CARD_HANDHELD"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-04-QUAL",
+          "fileId": "30000000-0000-4000-8000-000000000051",
+          "documentType": "DOCTOR_QUALIFICATION"
+        },
+        {
+          "code": "DOC-DOCTOR-BJ-04-PRACTICE",
+          "fileId": "30000000-0000-4000-8000-000000000052",
+          "documentType": "DOCTOR_PRACTICE_CERTIFICATE"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000013",
+      "code": "ACCOUNT-DOCTOR-SZ-01",
+      "phone": "+8613900090013",
+      "roleCode": "DOCTOR",
+      "displayName": "青岚演示医生甲",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000013",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "青岚演示医生甲",
+        "idNumber": "DEMODOCTOR000009",
+        "department": "轻医美演示科",
+        "title": "演示执业医师",
+        "qualificationNo": "DEMOQUAL000009",
+        "practiceNo": "DEMOPRACTICE000009",
+        "reason": "用于虚构医生身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-DOCTOR-SZ-01-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000053",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-DOCTOR-SZ-01-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000054",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-DOCTOR-SZ-01-HAND",
+          "fileId": "30000000-0000-4000-8000-000000000055",
+          "documentType": "ID_CARD_HANDHELD"
+        },
+        {
+          "code": "DOC-DOCTOR-SZ-01-QUAL",
+          "fileId": "30000000-0000-4000-8000-000000000056",
+          "documentType": "DOCTOR_QUALIFICATION"
+        },
+        {
+          "code": "DOC-DOCTOR-SZ-01-PRACTICE",
+          "fileId": "30000000-0000-4000-8000-000000000057",
+          "documentType": "DOCTOR_PRACTICE_CERTIFICATE"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000014",
+      "code": "ACCOUNT-DOCTOR-CD-01",
+      "phone": "+8613900090014",
+      "roleCode": "DOCTOR",
+      "displayName": "云舒演示医生甲",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000014",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "云舒演示医生甲",
+        "idNumber": "DEMODOCTOR000010",
+        "department": "抗衰管理演示科",
+        "title": "演示执业医师",
+        "qualificationNo": "DEMOQUAL000010",
+        "practiceNo": "DEMOPRACTICE000010",
+        "reason": "用于虚构医生身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-DOCTOR-CD-01-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000058",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-DOCTOR-CD-01-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000059",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-DOCTOR-CD-01-HAND",
+          "fileId": "30000000-0000-4000-8000-000000000060",
+          "documentType": "ID_CARD_HANDHELD"
+        },
+        {
+          "code": "DOC-DOCTOR-CD-01-QUAL",
+          "fileId": "30000000-0000-4000-8000-000000000061",
+          "documentType": "DOCTOR_QUALIFICATION"
+        },
+        {
+          "code": "DOC-DOCTOR-CD-01-PRACTICE",
+          "fileId": "30000000-0000-4000-8000-000000000062",
+          "documentType": "DOCTOR_PRACTICE_CERTIFICATE"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000015",
+      "code": "ACCOUNT-CONSULTANT-SH-01",
+      "phone": "+8613900090015",
+      "roleCode": "CONSULTANT",
+      "displayName": "澄光演示顾问",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000015",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "澄光演示顾问",
+        "idNumber": "DEMOCONSULT000001",
+        "experience": "虚构顾问经历，仅用于流程演示。",
+        "proofDescription": "虚构顾问能力说明。",
+        "reason": "用于虚构顾问身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-CONSULTANT-SH-01-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000063",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-CONSULTANT-SH-01-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000064",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-CONSULTANT-SH-01-PROOF",
+          "fileId": "30000000-0000-4000-8000-000000000065",
+          "documentType": "CONSULTANT_PROOF"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000016",
+      "code": "ACCOUNT-CONSULTANT-SH-02",
+      "phone": "+8613900090016",
+      "roleCode": "CONSULTANT",
+      "displayName": "栖颜演示顾问",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000016",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "栖颜演示顾问",
+        "idNumber": "DEMOCONSULT000002",
+        "experience": "虚构顾问经历，仅用于流程演示。",
+        "proofDescription": "虚构顾问能力说明。",
+        "reason": "用于虚构顾问身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-CONSULTANT-SH-02-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000066",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-CONSULTANT-SH-02-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000067",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-CONSULTANT-SH-02-PROOF",
+          "fileId": "30000000-0000-4000-8000-000000000068",
+          "documentType": "CONSULTANT_PROOF"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000017",
+      "code": "ACCOUNT-CONSULTANT-BJ-01",
+      "phone": "+8613900090017",
+      "roleCode": "CONSULTANT",
+      "displayName": "和悦演示顾问",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000017",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "和悦演示顾问",
+        "idNumber": "DEMOCONSULT000003",
+        "experience": "虚构顾问经历，仅用于流程演示。",
+        "proofDescription": "虚构顾问能力说明。",
+        "reason": "用于虚构顾问身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-CONSULTANT-BJ-01-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000069",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-CONSULTANT-BJ-01-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000070",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-CONSULTANT-BJ-01-PROOF",
+          "fileId": "30000000-0000-4000-8000-000000000071",
+          "documentType": "CONSULTANT_PROOF"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000018",
+      "code": "ACCOUNT-CONSULTANT-BJ-02",
+      "phone": "+8613900090018",
+      "roleCode": "CONSULTANT",
+      "displayName": "臻序演示顾问",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000018",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "臻序演示顾问",
+        "idNumber": "DEMOCONSULT000004",
+        "experience": "虚构顾问经历，仅用于流程演示。",
+        "proofDescription": "虚构顾问能力说明。",
+        "reason": "用于虚构顾问身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-CONSULTANT-BJ-02-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000072",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-CONSULTANT-BJ-02-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000073",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-CONSULTANT-BJ-02-PROOF",
+          "fileId": "30000000-0000-4000-8000-000000000074",
+          "documentType": "CONSULTANT_PROOF"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000019",
+      "code": "ACCOUNT-CONSULTANT-SZ-01",
+      "phone": "+8613900090019",
+      "roleCode": "CONSULTANT",
+      "displayName": "青岚演示顾问",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000019",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "青岚演示顾问",
+        "idNumber": "DEMOCONSULT000005",
+        "experience": "虚构顾问经历，仅用于流程演示。",
+        "proofDescription": "虚构顾问能力说明。",
+        "reason": "用于虚构顾问身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-CONSULTANT-SZ-01-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000075",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-CONSULTANT-SZ-01-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000076",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-CONSULTANT-SZ-01-PROOF",
+          "fileId": "30000000-0000-4000-8000-000000000077",
+          "documentType": "CONSULTANT_PROOF"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000020",
+      "code": "ACCOUNT-CONSULTANT-CD-01",
+      "phone": "+8613900090020",
+      "roleCode": "CONSULTANT",
+      "displayName": "云舒演示顾问",
+      "accountState": "ACTIVE",
+      "identityApplicationId": "20000000-0000-4000-8000-000000000020",
+      "identityStatus": "APPROVED",
+      "identityData": {
+        "realName": "云舒演示顾问",
+        "idNumber": "DEMOCONSULT000006",
+        "experience": "虚构顾问经历，仅用于流程演示。",
+        "proofDescription": "虚构顾问能力说明。",
+        "reason": "用于虚构顾问身份流程演示。"
+      },
+      "identityDocuments": [
+        {
+          "code": "DOC-CONSULTANT-CD-01-FRONT",
+          "fileId": "30000000-0000-4000-8000-000000000078",
+          "documentType": "ID_CARD_FRONT"
+        },
+        {
+          "code": "DOC-CONSULTANT-CD-01-BACK",
+          "fileId": "30000000-0000-4000-8000-000000000079",
+          "documentType": "ID_CARD_BACK"
+        },
+        {
+          "code": "DOC-CONSULTANT-CD-01-PROOF",
+          "fileId": "30000000-0000-4000-8000-000000000080",
+          "documentType": "CONSULTANT_PROOF"
+        }
+      ]
+    }
+  ],
+  "institutions": [
+    {
+      "id": "10000000-0000-4000-8000-000000000001",
+      "code": "INST-SH-01",
+      "name": "上海澄光医疗美容演示中心",
+      "city": "上海",
+      "description": "虚构的综合皮肤管理演示机构，仅用于虚构演示，不构成诊断、治疗建议或疗效承诺。",
+      "address": "上海市演示新区澄光路一号",
+      "contactPhone": ""
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000002",
+      "code": "INST-SH-02",
+      "name": "上海栖颜皮肤医疗美容演示门诊",
+      "city": "上海",
+      "description": "虚构的精细皮肤护理演示机构，仅用于虚构演示，不构成诊断、治疗建议或疗效承诺。",
+      "address": "上海市演示新区栖颜路二号",
+      "contactPhone": ""
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000003",
+      "code": "INST-BJ-01",
+      "name": "北京和悦医疗美容演示中心",
+      "city": "北京",
+      "description": "虚构的抗衰与眼部项目演示机构，仅用于虚构演示，不构成诊断、治疗建议或疗效承诺。",
+      "address": "北京市演示新区和悦街三号",
+      "contactPhone": ""
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000004",
+      "code": "INST-BJ-02",
+      "name": "北京臻序整形美容演示门诊",
+      "city": "北京",
+      "description": "虚构的整形项目演示机构，仅用于虚构演示，不构成诊断、治疗建议或疗效承诺。",
+      "address": "北京市演示新区臻序街四号",
+      "contactPhone": ""
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000005",
+      "code": "INST-SZ-01",
+      "name": "深圳青岚轻医美演示中心",
+      "city": "深圳",
+      "description": "虚构的轻医美与形体管理演示机构，仅用于虚构演示，不构成诊断、治疗建议或疗效承诺。",
+      "address": "深圳市演示新区青岚路五号",
+      "contactPhone": ""
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000006",
+      "code": "INST-CD-01",
+      "name": "成都云舒医疗美容演示门诊",
+      "city": "成都",
+      "description": "虚构的舒缓抗衰演示机构，仅用于虚构演示，不构成诊断、治疗建议或疗效承诺。",
+      "address": "成都市演示新区云舒路六号",
+      "contactPhone": ""
+    }
+  ],
+  "legalRepresentativeMemberships": [
+    {
+      "id": "40000000-0000-4000-8000-000000000001",
+      "code": "LEGAL-MEMBERSHIP-SH-01",
+      "accountCode": "ACCOUNT-LEGAL-01",
+      "institutionCode": "INST-SH-01",
+      "isPrimary": true
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000002",
+      "code": "LEGAL-MEMBERSHIP-SH-02",
+      "accountCode": "ACCOUNT-LEGAL-01",
+      "institutionCode": "INST-SH-02",
+      "isPrimary": false
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000003",
+      "code": "LEGAL-MEMBERSHIP-BJ-01",
+      "accountCode": "ACCOUNT-LEGAL-02",
+      "institutionCode": "INST-BJ-01",
+      "isPrimary": true
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000004",
+      "code": "LEGAL-MEMBERSHIP-BJ-02",
+      "accountCode": "ACCOUNT-LEGAL-02",
+      "institutionCode": "INST-BJ-02",
+      "isPrimary": false
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000005",
+      "code": "LEGAL-MEMBERSHIP-SZ-01",
+      "accountCode": "ACCOUNT-LEGAL-03",
+      "institutionCode": "INST-SZ-01",
+      "isPrimary": true
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000006",
+      "code": "LEGAL-MEMBERSHIP-CD-01",
+      "accountCode": "ACCOUNT-LEGAL-04",
+      "institutionCode": "INST-CD-01",
+      "isPrimary": true
+    }
+  ],
+  "doctors": [
+    {
+      "code": "DOCTOR-SH-01",
+      "accountCode": "ACCOUNT-DOCTOR-SH-01",
+      "institutionCode": "INST-SH-01",
+      "practiceRelationId": "41000000-0000-4000-8000-000000000001",
+      "practiceRelationCode": "PRACTICE-DOCTOR-SH-01",
+      "name": "澄光演示医生甲",
+      "title": "演示主诊医师",
+      "specialty": "皮肤光电管理",
+      "introduction": "虚构医生资料，仅用于中文目录和功能演示。"
+    },
+    {
+      "code": "DOCTOR-SH-02",
+      "accountCode": "ACCOUNT-DOCTOR-SH-02",
+      "institutionCode": "INST-SH-01",
+      "practiceRelationId": "41000000-0000-4000-8000-000000000002",
+      "practiceRelationCode": "PRACTICE-DOCTOR-SH-02",
+      "name": "澄光演示医生乙",
+      "title": "演示执业医师",
+      "specialty": "抗衰紧致管理",
+      "introduction": "虚构医生资料，仅用于中文目录和功能演示。"
+    },
+    {
+      "code": "DOCTOR-SH-03",
+      "accountCode": "ACCOUNT-DOCTOR-SH-03",
+      "institutionCode": "INST-SH-02",
+      "practiceRelationId": "41000000-0000-4000-8000-000000000003",
+      "practiceRelationCode": "PRACTICE-DOCTOR-SH-03",
+      "name": "栖颜演示医生甲",
+      "title": "演示主诊医师",
+      "specialty": "皮肤修护管理",
+      "introduction": "虚构医生资料，仅用于中文目录和功能演示。"
+    },
+    {
+      "code": "DOCTOR-SH-04",
+      "accountCode": "ACCOUNT-DOCTOR-SH-04",
+      "institutionCode": "INST-SH-02",
+      "practiceRelationId": "41000000-0000-4000-8000-000000000004",
+      "practiceRelationCode": "PRACTICE-DOCTOR-SH-04",
+      "name": "栖颜演示医生乙",
+      "title": "演示执业医师",
+      "specialty": "眼周年轻化管理",
+      "introduction": "虚构医生资料，仅用于中文目录和功能演示。"
+    },
+    {
+      "code": "DOCTOR-BJ-01",
+      "accountCode": "ACCOUNT-DOCTOR-BJ-01",
+      "institutionCode": "INST-BJ-01",
+      "practiceRelationId": "41000000-0000-4000-8000-000000000005",
+      "practiceRelationCode": "PRACTICE-DOCTOR-BJ-01",
+      "name": "和悦演示医生甲",
+      "title": "演示主诊医师",
+      "specialty": "眼部与紧致管理",
+      "introduction": "虚构医生资料，仅用于中文目录和功能演示。"
+    },
+    {
+      "code": "DOCTOR-BJ-02",
+      "accountCode": "ACCOUNT-DOCTOR-BJ-02",
+      "institutionCode": "INST-BJ-01",
+      "practiceRelationId": "41000000-0000-4000-8000-000000000006",
+      "practiceRelationCode": "PRACTICE-DOCTOR-BJ-02",
+      "name": "和悦演示医生乙",
+      "title": "演示执业医师",
+      "specialty": "注射美容管理",
+      "introduction": "虚构医生资料，仅用于中文目录和功能演示。"
+    },
+    {
+      "code": "DOCTOR-BJ-03",
+      "accountCode": "ACCOUNT-DOCTOR-BJ-03",
+      "institutionCode": "INST-BJ-02",
+      "practiceRelationId": "41000000-0000-4000-8000-000000000007",
+      "practiceRelationCode": "PRACTICE-DOCTOR-BJ-03",
+      "name": "臻序演示医生甲",
+      "title": "演示主诊医师",
+      "specialty": "眼鼻综合管理",
+      "introduction": "虚构医生资料，仅用于中文目录和功能演示。"
+    },
+    {
+      "code": "DOCTOR-BJ-04",
+      "accountCode": "ACCOUNT-DOCTOR-BJ-04",
+      "institutionCode": "INST-BJ-02",
+      "practiceRelationId": "41000000-0000-4000-8000-000000000008",
+      "practiceRelationCode": "PRACTICE-DOCTOR-BJ-04",
+      "name": "臻序演示医生乙",
+      "title": "演示执业医师",
+      "specialty": "面部年轻化管理",
+      "introduction": "虚构医生资料，仅用于中文目录和功能演示。"
+    },
+    {
+      "code": "DOCTOR-SZ-01",
+      "accountCode": "ACCOUNT-DOCTOR-SZ-01",
+      "institutionCode": "INST-SZ-01",
+      "practiceRelationId": "41000000-0000-4000-8000-000000000009",
+      "practiceRelationCode": "PRACTICE-DOCTOR-SZ-01",
+      "name": "青岚演示医生甲",
+      "title": "演示执业医师",
+      "specialty": "轻医美与形体管理",
+      "introduction": "虚构医生资料，仅用于中文目录和功能演示。"
+    },
+    {
+      "code": "DOCTOR-CD-01",
+      "accountCode": "ACCOUNT-DOCTOR-CD-01",
+      "institutionCode": "INST-CD-01",
+      "practiceRelationId": "41000000-0000-4000-8000-000000000010",
+      "practiceRelationCode": "PRACTICE-DOCTOR-CD-01",
+      "name": "云舒演示医生甲",
+      "title": "演示执业医师",
+      "specialty": "舒缓抗衰管理",
+      "introduction": "虚构医生资料，仅用于中文目录和功能演示。"
+    }
+  ],
+  "consultantMemberships": [
+    {
+      "id": "42000000-0000-4000-8000-000000000001",
+      "code": "CONSULTANT-MEMBERSHIP-SH-01",
+      "accountCode": "ACCOUNT-CONSULTANT-SH-01",
+      "institutionCode": "INST-SH-01",
+      "isPrimary": true
+    },
+    {
+      "id": "42000000-0000-4000-8000-000000000002",
+      "code": "CONSULTANT-MEMBERSHIP-SH-02",
+      "accountCode": "ACCOUNT-CONSULTANT-SH-02",
+      "institutionCode": "INST-SH-02",
+      "isPrimary": true
+    },
+    {
+      "id": "42000000-0000-4000-8000-000000000003",
+      "code": "CONSULTANT-MEMBERSHIP-BJ-01",
+      "accountCode": "ACCOUNT-CONSULTANT-BJ-01",
+      "institutionCode": "INST-BJ-01",
+      "isPrimary": true
+    },
+    {
+      "id": "42000000-0000-4000-8000-000000000004",
+      "code": "CONSULTANT-MEMBERSHIP-BJ-02",
+      "accountCode": "ACCOUNT-CONSULTANT-BJ-02",
+      "institutionCode": "INST-BJ-02",
+      "isPrimary": true
+    },
+    {
+      "id": "42000000-0000-4000-8000-000000000005",
+      "code": "CONSULTANT-MEMBERSHIP-SZ-01",
+      "accountCode": "ACCOUNT-CONSULTANT-SZ-01",
+      "institutionCode": "INST-SZ-01",
+      "isPrimary": true
+    },
+    {
+      "id": "42000000-0000-4000-8000-000000000006",
+      "code": "CONSULTANT-MEMBERSHIP-CD-01",
+      "accountCode": "ACCOUNT-CONSULTANT-CD-01",
+      "institutionCode": "INST-CD-01",
+      "isPrimary": true
+    }
+  ],
+  "wallets": [
+    {
+      "code": "WALLET-DOCTOR-SH-01",
+      "ownerType": "DOCTOR",
+      "ownerCode": "DOCTOR-SH-01",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-DOCTOR-SH-02",
+      "ownerType": "DOCTOR",
+      "ownerCode": "DOCTOR-SH-02",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-DOCTOR-SH-03",
+      "ownerType": "DOCTOR",
+      "ownerCode": "DOCTOR-SH-03",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-DOCTOR-SH-04",
+      "ownerType": "DOCTOR",
+      "ownerCode": "DOCTOR-SH-04",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-DOCTOR-BJ-01",
+      "ownerType": "DOCTOR",
+      "ownerCode": "DOCTOR-BJ-01",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-DOCTOR-BJ-02",
+      "ownerType": "DOCTOR",
+      "ownerCode": "DOCTOR-BJ-02",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-DOCTOR-BJ-03",
+      "ownerType": "DOCTOR",
+      "ownerCode": "DOCTOR-BJ-03",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-DOCTOR-BJ-04",
+      "ownerType": "DOCTOR",
+      "ownerCode": "DOCTOR-BJ-04",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-DOCTOR-SZ-01",
+      "ownerType": "DOCTOR",
+      "ownerCode": "DOCTOR-SZ-01",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-DOCTOR-CD-01",
+      "ownerType": "DOCTOR",
+      "ownerCode": "DOCTOR-CD-01",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-CONSULTANT-SH-01",
+      "ownerType": "CONSULTANT",
+      "ownerCode": "ACCOUNT-CONSULTANT-SH-01",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-CONSULTANT-SH-02",
+      "ownerType": "CONSULTANT",
+      "ownerCode": "ACCOUNT-CONSULTANT-SH-02",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-CONSULTANT-BJ-01",
+      "ownerType": "CONSULTANT",
+      "ownerCode": "ACCOUNT-CONSULTANT-BJ-01",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-CONSULTANT-BJ-02",
+      "ownerType": "CONSULTANT",
+      "ownerCode": "ACCOUNT-CONSULTANT-BJ-02",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-CONSULTANT-SZ-01",
+      "ownerType": "CONSULTANT",
+      "ownerCode": "ACCOUNT-CONSULTANT-SZ-01",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-CONSULTANT-CD-01",
+      "ownerType": "CONSULTANT",
+      "ownerCode": "ACCOUNT-CONSULTANT-CD-01",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-INSTITUTION-SH-01",
+      "ownerType": "INSTITUTION",
+      "ownerCode": "INST-SH-01",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-INSTITUTION-SH-02",
+      "ownerType": "INSTITUTION",
+      "ownerCode": "INST-SH-02",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-INSTITUTION-BJ-01",
+      "ownerType": "INSTITUTION",
+      "ownerCode": "INST-BJ-01",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-INSTITUTION-BJ-02",
+      "ownerType": "INSTITUTION",
+      "ownerCode": "INST-BJ-02",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-INSTITUTION-SZ-01",
+      "ownerType": "INSTITUTION",
+      "ownerCode": "INST-SZ-01",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    },
+    {
+      "code": "WALLET-INSTITUTION-CD-01",
+      "ownerType": "INSTITUTION",
+      "ownerCode": "INST-CD-01",
+      "currency": "USD",
+      "pendingMinor": 0,
+      "availableMinor": 0,
+      "frozenMinor": 0
+    }
+  ],
+  "projects": [
+    {
+      "id": "50000000-0000-4000-8000-000000000001",
+      "code": "PROJECT-SKIN-01",
+      "name": "光子嫩肤",
+      "category": "皮肤管理",
+      "description": "用于改善肤色观感的虚构演示项目，不构成诊断、治疗建议或疗效承诺。",
+      "referencePrice": 180.00,
+      "currency": "USD",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "tags": [
+        "虚构演示",
+        "皮肤管理"
+      ],
+      "categoryTags": [
+        "皮肤管理"
+      ],
+      "slogan": "虚构项目，仅用于演示",
+      "detailContent": "<p>用于改善肤色观感的虚构演示项目，不构成诊断、治疗建议或疗效承诺。</p>"
+    },
+    {
+      "id": "50000000-0000-4000-8000-000000000002",
+      "code": "PROJECT-SKIN-02",
+      "name": "皮秒净肤",
+      "category": "皮肤管理",
+      "description": "用于皮肤净澈展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。",
+      "referencePrice": 280.00,
+      "currency": "USD",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "tags": [
+        "虚构演示",
+        "皮肤管理"
+      ],
+      "categoryTags": [
+        "皮肤管理"
+      ],
+      "slogan": "虚构项目，仅用于演示",
+      "detailContent": "<p>用于皮肤净澈展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。</p>"
+    },
+    {
+      "id": "50000000-0000-4000-8000-000000000003",
+      "code": "PROJECT-SKIN-03",
+      "name": "点阵激光修护",
+      "category": "皮肤管理",
+      "description": "用于皮肤修护展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。",
+      "referencePrice": 420.00,
+      "currency": "USD",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "tags": [
+        "虚构演示",
+        "皮肤管理"
+      ],
+      "categoryTags": [
+        "皮肤管理"
+      ],
+      "slogan": "虚构项目，仅用于演示",
+      "detailContent": "<p>用于皮肤修护展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。</p>"
+    },
+    {
+      "id": "50000000-0000-4000-8000-000000000004",
+      "code": "PROJECT-INJECT-01",
+      "name": "水光补水治疗",
+      "category": "注射美容",
+      "description": "用于补水管理展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。",
+      "referencePrice": 320.00,
+      "currency": "USD",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "tags": [
+        "虚构演示",
+        "注射美容"
+      ],
+      "categoryTags": [
+        "注射美容"
+      ],
+      "slogan": "虚构项目，仅用于演示",
+      "detailContent": "<p>用于补水管理展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。</p>"
+    },
+    {
+      "id": "50000000-0000-4000-8000-000000000005",
+      "code": "PROJECT-INJECT-02",
+      "name": "透明质酸面部填充",
+      "category": "注射美容",
+      "description": "用于面部轮廓展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。",
+      "referencePrice": 680.00,
+      "currency": "USD",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "tags": [
+        "虚构演示",
+        "注射美容"
+      ],
+      "categoryTags": [
+        "注射美容"
+      ],
+      "slogan": "虚构项目，仅用于演示",
+      "detailContent": "<p>用于面部轮廓展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。</p>"
+    },
+    {
+      "id": "50000000-0000-4000-8000-000000000006",
+      "code": "PROJECT-INJECT-03",
+      "name": "动态纹改善",
+      "category": "注射美容",
+      "description": "用于动态纹管理展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。",
+      "referencePrice": 460.00,
+      "currency": "USD",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "tags": [
+        "虚构演示",
+        "注射美容"
+      ],
+      "categoryTags": [
+        "注射美容"
+      ],
+      "slogan": "虚构项目，仅用于演示",
+      "detailContent": "<p>用于动态纹管理展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。</p>"
+    },
+    {
+      "id": "50000000-0000-4000-8000-000000000007",
+      "code": "PROJECT-AGING-01",
+      "name": "射频紧致",
+      "category": "抗衰紧致",
+      "description": "用于紧致管理展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。",
+      "referencePrice": 950.00,
+      "currency": "USD",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "tags": [
+        "虚构演示",
+        "抗衰紧致"
+      ],
+      "categoryTags": [
+        "抗衰紧致"
+      ],
+      "slogan": "虚构项目，仅用于演示",
+      "detailContent": "<p>用于紧致管理展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。</p>"
+    },
+    {
+      "id": "50000000-0000-4000-8000-000000000008",
+      "code": "PROJECT-AGING-02",
+      "name": "超声提升",
+      "category": "抗衰紧致",
+      "description": "用于提升管理展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。",
+      "referencePrice": 1300.00,
+      "currency": "USD",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "tags": [
+        "虚构演示",
+        "抗衰紧致"
+      ],
+      "categoryTags": [
+        "抗衰紧致"
+      ],
+      "slogan": "虚构项目，仅用于演示",
+      "detailContent": "<p>用于提升管理展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。</p>"
+    },
+    {
+      "id": "50000000-0000-4000-8000-000000000009",
+      "code": "PROJECT-EYE-01",
+      "name": "重睑成形",
+      "category": "眼部整形",
+      "description": "用于眼部整形流程展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。",
+      "referencePrice": 1800.00,
+      "currency": "USD",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "tags": [
+        "虚构演示",
+        "眼部整形"
+      ],
+      "categoryTags": [
+        "眼部整形"
+      ],
+      "slogan": "虚构项目，仅用于演示",
+      "detailContent": "<p>用于眼部整形流程展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。</p>"
+    },
+    {
+      "id": "50000000-0000-4000-8000-000000000010",
+      "code": "PROJECT-EYE-02",
+      "name": "眼周综合年轻化",
+      "category": "眼部整形",
+      "description": "用于眼周年轻化展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。",
+      "referencePrice": 2600.00,
+      "currency": "USD",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "tags": [
+        "虚构演示",
+        "眼部整形"
+      ],
+      "categoryTags": [
+        "眼部整形"
+      ],
+      "slogan": "虚构项目，仅用于演示",
+      "detailContent": "<p>用于眼周年轻化展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。</p>"
+    },
+    {
+      "id": "50000000-0000-4000-8000-000000000011",
+      "code": "PROJECT-NOSE-01",
+      "name": "鼻部综合塑形",
+      "category": "鼻部整形",
+      "description": "用于鼻部塑形流程展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。",
+      "referencePrice": 3500.00,
+      "currency": "USD",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "tags": [
+        "虚构演示",
+        "鼻部整形"
+      ],
+      "categoryTags": [
+        "鼻部整形"
+      ],
+      "slogan": "虚构项目，仅用于演示",
+      "detailContent": "<p>用于鼻部塑形流程展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。</p>"
+    },
+    {
+      "id": "50000000-0000-4000-8000-000000000012",
+      "code": "PROJECT-BODY-01",
+      "name": "非侵入式塑形",
+      "category": "形体管理",
+      "description": "用于形体管理展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。",
+      "referencePrice": 650.00,
+      "currency": "USD",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "tags": [
+        "虚构演示",
+        "形体管理"
+      ],
+      "categoryTags": [
+        "形体管理"
+      ],
+      "slogan": "虚构项目，仅用于演示",
+      "detailContent": "<p>用于形体管理展示的虚构演示项目，不构成诊断、治疗建议或疗效承诺。</p>"
+    }
+  ],
+  "institutionProjects": [
+    {
+      "id": "60000000-0000-4000-8000-000000000001",
+      "code": "IP-SH-01-SKIN-01",
+      "institutionCode": "INST-SH-01",
+      "projectCode": "PROJECT-SKIN-01",
+      "name": "澄光光子嫩肤演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 180.00,
+      "isActive": true,
+      "originalPrice": 180.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000002",
+      "code": "IP-SH-01-SKIN-02",
+      "institutionCode": "INST-SH-01",
+      "projectCode": "PROJECT-SKIN-02",
+      "name": "澄光皮秒净肤演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 260.00,
+      "isActive": true,
+      "originalPrice": 260.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000003",
+      "code": "IP-SH-01-INJECT-01",
+      "institutionCode": "INST-SH-01",
+      "projectCode": "PROJECT-INJECT-01",
+      "name": "澄光水光补水演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 300.00,
+      "isActive": true,
+      "originalPrice": 300.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000004",
+      "code": "IP-SH-01-AGING-01",
+      "institutionCode": "INST-SH-01",
+      "projectCode": "PROJECT-AGING-01",
+      "name": "澄光射频紧致演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 920.00,
+      "isActive": true,
+      "originalPrice": 920.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000005",
+      "code": "IP-SH-01-SKIN-03",
+      "institutionCode": "INST-SH-01",
+      "projectCode": "PROJECT-SKIN-03",
+      "name": "澄光点阵修护暂停方案",
+      "description": "虚构演示暂停方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 400.00,
+      "isActive": false,
+      "originalPrice": 400.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示暂停方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000006",
+      "code": "IP-SH-02-SKIN-01",
+      "institutionCode": "INST-SH-02",
+      "projectCode": "PROJECT-SKIN-01",
+      "name": "栖颜光子嫩肤演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 205.00,
+      "isActive": true,
+      "originalPrice": 205.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000007",
+      "code": "IP-SH-02-SKIN-02",
+      "institutionCode": "INST-SH-02",
+      "projectCode": "PROJECT-SKIN-02",
+      "name": "栖颜皮秒净肤演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 295.00,
+      "isActive": true,
+      "originalPrice": 295.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000008",
+      "code": "IP-SH-02-INJECT-02",
+      "institutionCode": "INST-SH-02",
+      "projectCode": "PROJECT-INJECT-02",
+      "name": "栖颜面部填充演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 720.00,
+      "isActive": true,
+      "originalPrice": 720.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000009",
+      "code": "IP-SH-02-EYE-02",
+      "institutionCode": "INST-SH-02",
+      "projectCode": "PROJECT-EYE-02",
+      "name": "栖颜眼周年轻化演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 2500.00,
+      "isActive": true,
+      "originalPrice": 2500.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000010",
+      "code": "IP-BJ-01-AGING-01",
+      "institutionCode": "INST-BJ-01",
+      "projectCode": "PROJECT-AGING-01",
+      "name": "和悦射频紧致演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 880.00,
+      "isActive": true,
+      "originalPrice": 880.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000011",
+      "code": "IP-BJ-01-EYE-01",
+      "institutionCode": "INST-BJ-01",
+      "projectCode": "PROJECT-EYE-01",
+      "name": "和悦重睑成形演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 1680.00,
+      "isActive": true,
+      "originalPrice": 1680.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000012",
+      "code": "IP-BJ-01-INJECT-03",
+      "institutionCode": "INST-BJ-01",
+      "projectCode": "PROJECT-INJECT-03",
+      "name": "和悦动态纹改善演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 460.00,
+      "isActive": true,
+      "originalPrice": 460.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000013",
+      "code": "IP-BJ-01-AGING-02",
+      "institutionCode": "INST-BJ-01",
+      "projectCode": "PROJECT-AGING-02",
+      "name": "和悦超声提升暂停方案",
+      "description": "虚构演示暂停方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 1250.00,
+      "isActive": false,
+      "originalPrice": 1250.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示暂停方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000014",
+      "code": "IP-BJ-02-AGING-01",
+      "institutionCode": "INST-BJ-02",
+      "projectCode": "PROJECT-AGING-01",
+      "name": "臻序射频紧致演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 990.00,
+      "isActive": true,
+      "originalPrice": 990.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000015",
+      "code": "IP-BJ-02-EYE-01",
+      "institutionCode": "INST-BJ-02",
+      "projectCode": "PROJECT-EYE-01",
+      "name": "臻序重睑成形演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 1880.00,
+      "isActive": true,
+      "originalPrice": 1880.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000016",
+      "code": "IP-BJ-02-NOSE-01",
+      "institutionCode": "INST-BJ-02",
+      "projectCode": "PROJECT-NOSE-01",
+      "name": "臻序鼻部塑形演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 3400.00,
+      "isActive": true,
+      "originalPrice": 3400.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000017",
+      "code": "IP-SZ-01-INJECT-01",
+      "institutionCode": "INST-SZ-01",
+      "projectCode": "PROJECT-INJECT-01",
+      "name": "青岚水光补水演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 340.00,
+      "isActive": true,
+      "originalPrice": 340.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000018",
+      "code": "IP-SZ-01-BODY-01",
+      "institutionCode": "INST-SZ-01",
+      "projectCode": "PROJECT-BODY-01",
+      "name": "青岚形体管理演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 620.00,
+      "isActive": true,
+      "originalPrice": 620.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000019",
+      "code": "IP-SZ-01-SKIN-03",
+      "institutionCode": "INST-SZ-01",
+      "projectCode": "PROJECT-SKIN-03",
+      "name": "青岚点阵修护暂停方案",
+      "description": "虚构演示暂停方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 430.00,
+      "isActive": false,
+      "originalPrice": 430.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示暂停方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000020",
+      "code": "IP-CD-01-AGING-02",
+      "institutionCode": "INST-CD-01",
+      "projectCode": "PROJECT-AGING-02",
+      "name": "云舒超声提升演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 1200.00,
+      "isActive": true,
+      "originalPrice": 1200.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    },
+    {
+      "id": "60000000-0000-4000-8000-000000000021",
+      "code": "IP-CD-01-INJECT-02",
+      "institutionCode": "INST-CD-01",
+      "projectCode": "PROJECT-INJECT-02",
+      "name": "云舒面部填充演示方案",
+      "description": "虚构演示方案，不构成诊断、治疗建议或疗效承诺。",
+      "price": 650.00,
+      "isActive": true,
+      "originalPrice": 650.00,
+      "currency": "USD",
+      "tags": [
+        "虚构演示",
+        "机构方案"
+      ],
+      "slogan": "虚构方案，仅用于演示",
+      "detailContent": "<p>虚构演示方案，不构成诊断、治疗建议或疗效承诺。</p>",
+      "salesCount": 0,
+      "reviewCount": 0,
+      "caseCount": 0,
+      "consultationCount": 0
+    }
+  ],
+  "doctorProjects": [
+    {
+      "id": "70000000-0000-4000-8000-000000000001",
+      "code": "DP-SH-01-01",
+      "doctorCode": "DOCTOR-SH-01",
+      "institutionProjectCode": "IP-SH-01-SKIN-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 190.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000001",
+      "splitConfigCode": "SPLIT-DP-SH-01-01",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 190.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000002",
+      "code": "DP-SH-01-02",
+      "doctorCode": "DOCTOR-SH-01",
+      "institutionProjectCode": "IP-SH-01-SKIN-02",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 270.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000002",
+      "splitConfigCode": "SPLIT-DP-SH-01-02",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 270.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000003",
+      "code": "DP-SH-01-03",
+      "doctorCode": "DOCTOR-SH-01",
+      "institutionProjectCode": "IP-SH-01-INJECT-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 310.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000003",
+      "splitConfigCode": "SPLIT-DP-SH-01-03",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 310.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000004",
+      "code": "DP-SH-01-04",
+      "doctorCode": "DOCTOR-SH-01",
+      "institutionProjectCode": "IP-SH-01-AGING-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 940.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000004",
+      "splitConfigCode": "SPLIT-DP-SH-01-04",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 940.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000005",
+      "code": "DP-SH-02-01",
+      "doctorCode": "DOCTOR-SH-02",
+      "institutionProjectCode": "IP-SH-01-SKIN-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 185.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000005",
+      "splitConfigCode": "SPLIT-DP-SH-02-01",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 185.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000006",
+      "code": "DP-SH-02-02",
+      "doctorCode": "DOCTOR-SH-02",
+      "institutionProjectCode": "IP-SH-01-SKIN-02",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 265.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000006",
+      "splitConfigCode": "SPLIT-DP-SH-02-02",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 265.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000007",
+      "code": "DP-SH-02-03",
+      "doctorCode": "DOCTOR-SH-02",
+      "institutionProjectCode": "IP-SH-01-AGING-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 930.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000007",
+      "splitConfigCode": "SPLIT-DP-SH-02-03",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 930.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000008",
+      "code": "DP-SH-02-04",
+      "doctorCode": "DOCTOR-SH-02",
+      "institutionProjectCode": "IP-SH-01-SKIN-03",
+      "description": "虚构医生暂停绑定，仅用于演示。",
+      "price": 410.00,
+      "isActive": false,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000008",
+      "splitConfigCode": "SPLIT-DP-SH-02-04",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 410.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000009",
+      "code": "DP-SH-03-01",
+      "doctorCode": "DOCTOR-SH-03",
+      "institutionProjectCode": "IP-SH-02-SKIN-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 215.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000009",
+      "splitConfigCode": "SPLIT-DP-SH-03-01",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 215.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000010",
+      "code": "DP-SH-03-02",
+      "doctorCode": "DOCTOR-SH-03",
+      "institutionProjectCode": "IP-SH-02-SKIN-02",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 305.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000010",
+      "splitConfigCode": "SPLIT-DP-SH-03-02",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 305.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000011",
+      "code": "DP-SH-03-03",
+      "doctorCode": "DOCTOR-SH-03",
+      "institutionProjectCode": "IP-SH-02-INJECT-02",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 740.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000011",
+      "splitConfigCode": "SPLIT-DP-SH-03-03",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 740.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000012",
+      "code": "DP-SH-04-01",
+      "doctorCode": "DOCTOR-SH-04",
+      "institutionProjectCode": "IP-SH-02-SKIN-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 210.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000012",
+      "splitConfigCode": "SPLIT-DP-SH-04-01",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 210.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000013",
+      "code": "DP-SH-04-02",
+      "doctorCode": "DOCTOR-SH-04",
+      "institutionProjectCode": "IP-SH-02-EYE-02",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 2550.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000013",
+      "splitConfigCode": "SPLIT-DP-SH-04-02",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 2550.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000014",
+      "code": "DP-SH-04-03",
+      "doctorCode": "DOCTOR-SH-04",
+      "institutionProjectCode": "IP-SH-02-INJECT-02",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 730.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000014",
+      "splitConfigCode": "SPLIT-DP-SH-04-03",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 730.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000015",
+      "code": "DP-BJ-01-01",
+      "doctorCode": "DOCTOR-BJ-01",
+      "institutionProjectCode": "IP-BJ-01-AGING-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 900.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000015",
+      "splitConfigCode": "SPLIT-DP-BJ-01-01",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 900.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000016",
+      "code": "DP-BJ-01-02",
+      "doctorCode": "DOCTOR-BJ-01",
+      "institutionProjectCode": "IP-BJ-01-EYE-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 1720.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000016",
+      "splitConfigCode": "SPLIT-DP-BJ-01-02",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 1720.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000017",
+      "code": "DP-BJ-01-03",
+      "doctorCode": "DOCTOR-BJ-01",
+      "institutionProjectCode": "IP-BJ-01-AGING-02",
+      "description": "虚构医生暂停绑定，仅用于演示。",
+      "price": 1280.00,
+      "isActive": false,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000017",
+      "splitConfigCode": "SPLIT-DP-BJ-01-03",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 1280.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000018",
+      "code": "DP-BJ-02-01",
+      "doctorCode": "DOCTOR-BJ-02",
+      "institutionProjectCode": "IP-BJ-01-AGING-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 890.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000018",
+      "splitConfigCode": "SPLIT-DP-BJ-02-01",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 890.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000019",
+      "code": "DP-BJ-02-02",
+      "doctorCode": "DOCTOR-BJ-02",
+      "institutionProjectCode": "IP-BJ-01-INJECT-03",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 480.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000019",
+      "splitConfigCode": "SPLIT-DP-BJ-02-02",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 480.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000020",
+      "code": "DP-BJ-03-01",
+      "doctorCode": "DOCTOR-BJ-03",
+      "institutionProjectCode": "IP-BJ-02-AGING-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 1010.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000020",
+      "splitConfigCode": "SPLIT-DP-BJ-03-01",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 1010.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000021",
+      "code": "DP-BJ-03-02",
+      "doctorCode": "DOCTOR-BJ-03",
+      "institutionProjectCode": "IP-BJ-02-EYE-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 1920.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000021",
+      "splitConfigCode": "SPLIT-DP-BJ-03-02",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 1920.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000022",
+      "code": "DP-BJ-03-03",
+      "doctorCode": "DOCTOR-BJ-03",
+      "institutionProjectCode": "IP-BJ-02-NOSE-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 3480.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000022",
+      "splitConfigCode": "SPLIT-DP-BJ-03-03",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 3480.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000023",
+      "code": "DP-BJ-04-01",
+      "doctorCode": "DOCTOR-BJ-04",
+      "institutionProjectCode": "IP-BJ-02-AGING-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 1000.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000023",
+      "splitConfigCode": "SPLIT-DP-BJ-04-01",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 1000.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000024",
+      "code": "DP-BJ-04-02",
+      "doctorCode": "DOCTOR-BJ-04",
+      "institutionProjectCode": "IP-BJ-02-EYE-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 1900.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000024",
+      "splitConfigCode": "SPLIT-DP-BJ-04-02",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 1900.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000025",
+      "code": "DP-BJ-04-03",
+      "doctorCode": "DOCTOR-BJ-04",
+      "institutionProjectCode": "IP-BJ-02-NOSE-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 3450.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000025",
+      "splitConfigCode": "SPLIT-DP-BJ-04-03",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 3450.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000026",
+      "code": "DP-SZ-01-01",
+      "doctorCode": "DOCTOR-SZ-01",
+      "institutionProjectCode": "IP-SZ-01-INJECT-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 350.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000026",
+      "splitConfigCode": "SPLIT-DP-SZ-01-01",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 350.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000027",
+      "code": "DP-SZ-01-02",
+      "doctorCode": "DOCTOR-SZ-01",
+      "institutionProjectCode": "IP-SZ-01-BODY-01",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 640.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000027",
+      "splitConfigCode": "SPLIT-DP-SZ-01-02",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 640.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000028",
+      "code": "DP-SZ-01-03",
+      "doctorCode": "DOCTOR-SZ-01",
+      "institutionProjectCode": "IP-SZ-01-SKIN-03",
+      "description": "虚构医生暂停绑定，仅用于演示。",
+      "price": 440.00,
+      "isActive": false,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000028",
+      "splitConfigCode": "SPLIT-DP-SZ-01-03",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 440.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000029",
+      "code": "DP-CD-01-01",
+      "doctorCode": "DOCTOR-CD-01",
+      "institutionProjectCode": "IP-CD-01-AGING-02",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 1230.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000029",
+      "splitConfigCode": "SPLIT-DP-CD-01-01",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 1230.00
+    },
+    {
+      "id": "70000000-0000-4000-8000-000000000030",
+      "code": "DP-CD-01-02",
+      "doctorCode": "DOCTOR-CD-01",
+      "institutionProjectCode": "IP-CD-01-INJECT-02",
+      "description": "虚构医生服务绑定，仅用于演示。",
+      "price": 670.00,
+      "isActive": true,
+      "serviceTags": [
+        "虚构演示",
+        "医生服务"
+      ],
+      "scheduleNote": "演示时段",
+      "splitConfigId": "71000000-0000-4000-8000-000000000030",
+      "splitConfigCode": "SPLIT-DP-CD-01-02",
+      "consultationFee": 0.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "medicalListPrice": 670.00
+    }
+  ],
+  "projectRequests": [
+    {
+      "id": "80000000-0000-4000-8000-000000000001",
+      "code": "REQUEST-INSTITUTION-01",
+      "requestType": "INSTITUTION",
+      "doctorCode": "DOCTOR-SH-01",
+      "institutionCode": "INST-SH-01",
+      "projectCode": "PROJECT-INJECT-02",
+      "proposedName": "澄光面部填充待审方案",
+      "category": "注射美容",
+      "description": "虚构机构项目待审资料，不构成诊断、治疗建议或疗效承诺。",
+      "reason": "用于演示上海机构项目待审核流程。",
+      "currency": "USD",
+      "price": 700.00,
+      "originalPrice": 750.00,
+      "isActive": true,
+      "consultationFee": 20.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "status": "PENDING",
+      "reviewNote": "",
+      "tags": [
+        "虚构演示",
+        "项目申请"
+      ],
+      "slogan": "虚构申请，仅用于演示",
+      "detailContent": "<p>虚构机构项目待审资料，不构成诊断、治疗建议或疗效承诺。</p>",
+      "categoryTags": null
+    },
+    {
+      "id": "80000000-0000-4000-8000-000000000002",
+      "code": "REQUEST-INSTITUTION-02",
+      "requestType": "INSTITUTION",
+      "doctorCode": "DOCTOR-BJ-01",
+      "institutionCode": "INST-BJ-01",
+      "projectCode": "PROJECT-INJECT-01",
+      "proposedName": "和悦水光补水待审方案",
+      "category": "注射美容",
+      "description": "虚构机构项目待审资料，不构成诊断、治疗建议或疗效承诺。",
+      "reason": "用于演示北京机构项目待审核流程。",
+      "currency": "USD",
+      "price": 330.00,
+      "originalPrice": 360.00,
+      "isActive": true,
+      "consultationFee": 15.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "status": "PENDING",
+      "reviewNote": "",
+      "tags": [
+        "虚构演示",
+        "项目申请"
+      ],
+      "slogan": "虚构申请，仅用于演示",
+      "detailContent": "<p>虚构机构项目待审资料，不构成诊断、治疗建议或疗效承诺。</p>",
+      "categoryTags": null
+    },
+    {
+      "id": "80000000-0000-4000-8000-000000000003",
+      "code": "REQUEST-INSTITUTION-03",
+      "requestType": "INSTITUTION",
+      "doctorCode": "DOCTOR-CD-01",
+      "institutionCode": "INST-CD-01",
+      "projectCode": "PROJECT-SKIN-02",
+      "proposedName": "云舒皮秒净肤待审方案",
+      "category": "皮肤管理",
+      "description": "虚构机构项目待审资料，不构成诊断、治疗建议或疗效承诺。",
+      "reason": "用于演示成都机构项目待审核流程。",
+      "currency": "USD",
+      "price": 300.00,
+      "originalPrice": 330.00,
+      "isActive": true,
+      "consultationFee": 15.00,
+      "commissionRate": 10.00,
+      "institutionRate": 40.00,
+      "status": "PENDING",
+      "reviewNote": "",
+      "tags": [
+        "虚构演示",
+        "项目申请"
+      ],
+      "slogan": "虚构申请，仅用于演示",
+      "detailContent": "<p>虚构机构项目待审资料，不构成诊断、治疗建议或疗效承诺。</p>",
+      "categoryTags": null
+    },
+    {
+      "id": "80000000-0000-4000-8000-000000000004",
+      "code": "REQUEST-PLATFORM-01",
+      "requestType": "PLATFORM",
+      "doctorCode": "DOCTOR-SH-03",
+      "proposedName": "温和焕肤管理",
+      "category": "皮肤管理",
+      "description": "虚构平台项目待审资料，不构成诊断、治疗建议或疗效承诺。",
+      "reason": "用于演示平台项目待审核流程。",
+      "currency": "USD",
+      "referencePrice": 230.00,
+      "status": "PENDING",
+      "reviewNote": "",
+      "tags": [
+        "虚构演示",
+        "项目申请"
+      ],
+      "slogan": "虚构申请，仅用于演示",
+      "detailContent": "<p>虚构平台项目待审资料，不构成诊断、治疗建议或疗效承诺。</p>",
+      "categoryTags": [
+        "皮肤管理"
+      ]
+    },
+    {
+      "id": "80000000-0000-4000-8000-000000000005",
+      "code": "REQUEST-PLATFORM-02",
+      "requestType": "PLATFORM",
+      "doctorCode": "DOCTOR-BJ-02",
+      "proposedName": "快速焕颜演示项目",
+      "category": "注射美容",
+      "description": "虚构平台项目拒绝资料，不构成诊断、治疗建议或疗效承诺。",
+      "reason": "用于演示平台项目拒绝流程。",
+      "currency": "USD",
+      "referencePrice": 500.00,
+      "status": "REJECTED",
+      "reviewNote": "演示资料中的适用范围和风险提示不足，暂不通过。",
+      "tags": [
+        "虚构演示",
+        "项目申请"
+      ],
+      "slogan": "虚构申请，仅用于演示",
+      "detailContent": "<p>虚构平台项目拒绝资料，不构成诊断、治疗建议或疗效承诺。</p>",
+      "categoryTags": [
+        "注射美容"
+      ]
+    }
+  ]
+}

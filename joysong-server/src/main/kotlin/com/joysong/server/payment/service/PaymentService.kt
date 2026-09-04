@@ -35,7 +35,8 @@ class PaymentService(
     private val paymentGatewayRegistry: PaymentGatewayRegistry = PaymentGatewayRegistry(emptyList()),
     private val paymentPersistenceService: PaymentPersistenceService,
     private val paymentAttemptExpiryService: PaymentAttemptExpiryService =
-        PaymentAttemptExpiryService(paymentRepository)
+        PaymentAttemptExpiryService(paymentRepository),
+    private val demoPaymentPolicy: DemoPaymentPolicy? = null,
 ) {
     companion object {
         private val terminalStatuses = PaymentStatus.terminalDatabaseValues
@@ -54,6 +55,7 @@ class PaymentService(
         val normalizedKey = normalizeIdempotencyKey(idempotencyKey)
         val normalizedMethod = paymentMethod.trim().uppercase()
         require(normalizedMethod.isNotBlank() && normalizedMethod.length <= 50) { "INVALID_PAYMENT_METHOD" }
+        demoPaymentPolicy?.requirePaymentTypeAllowed(paymentType)
 
         // Reject disabled/unimplemented providers before creating a local attempt.
         val gateway = paymentGatewayRegistry.require(provider)

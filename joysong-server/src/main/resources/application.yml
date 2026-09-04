@@ -47,6 +47,17 @@ server:
 # 上传根目录。生产环境设为如 /var/lib/joysong/uploads，并与 Nginx 的 /images/ alias 保持一致。
 upload:
   local-dir: ${UPLOAD_LOCAL_DIR:./data/uploads}
+  # Public multipart uploads are staged once so validation, hashing, and OSS retries reuse one file.
+  staging-dir: ${UPLOAD_STAGING_DIR:}
+  idempotency-cleanup-delay-ms: ${UPLOAD_IDEMPOTENCY_CLEANUP_DELAY_MS:3600000}
+  # Private material is never served by Nginx. In OSS mode this remains the
+  # migration/rollback source for existing LOCAL_PRIVATE rows.
+  private-dir: ${UPLOAD_PRIVATE_DIR:./data/private}
+
+# Private identity and refund files never receive a public URL. The OSS mode
+# uses a separate private bucket and keeps downloads behind authenticated APIs.
+private-storage:
+  mode: ${PRIVATE_FILE_STORAGE_MODE:local}
 
 jwt:
   secret: ${JWT_SECRET}
@@ -69,7 +80,9 @@ security:
     log-for-dev: false
 
 google:
-  client-id: ${GOOGLE_CLIENT_ID}
+  # Demo/UAT may leave this blank because Google sign-in is not exposed there.
+  # ConfigValidator still requires it for every other profile.
+  client-id: ${GOOGLE_CLIENT_ID:}
   # 仅用于 Google ID Token 校验访问 Google 公钥；留空时直连，不影响其他 HTTP 请求。
   # 示例：http://127.0.0.1:7890 或 http://proxy.example.internal:8080
   proxy-url: ${GOOGLE_PROXY_URL:}
@@ -77,10 +90,19 @@ google:
 oss:
   enabled: ${OSS_ENABLED:false}
   endpoint: ${OSS_ENDPOINT:}
+  region: ${OSS_REGION:}
+  credential-mode: ${OSS_CREDENTIAL_MODE:static}
+  ecs-ram-role-name: ${OSS_ECS_RAM_ROLE_NAME:}
   access-key-id: ${OSS_ACCESS_KEY_ID:}
   access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
   bucket-name: ${OSS_BUCKET_NAME:}
+  private-bucket-name: ${OSS_PRIVATE_BUCKET_NAME:}
   public-base-url: ${OSS_PUBLIC_BASE_URL:}
+  connection-timeout-ms: ${OSS_CONNECTION_TIMEOUT_MS:5000}
+  socket-timeout-ms: ${OSS_SOCKET_TIMEOUT_MS:30000}
+  request-timeout-ms: ${OSS_REQUEST_TIMEOUT_MS:60000}
+  max-error-retry: ${OSS_MAX_ERROR_RETRY:1}
+  max-connections: ${OSS_MAX_CONNECTIONS:32}
 
 ai-agent:
   provider: ${AI_AGENT_PROVIDER:}
@@ -112,9 +134,9 @@ aliyun:
 
 payment:
   alipay-plus:
-    # Requires the dev profile and simulated gateway as independent safety gates.
+    # Automatic payment remains development-only and is rejected by demo/prod safety gates.
     auto-pay-on-order-create-enabled: ${ALIPAY_PLUS_AUTO_PAY_ON_ORDER_CREATE_ENABLED:false}
-    # Development-only simulated gateway. The prod profile overrides this to false.
+    # Explicit opt-in for the non-production simulated gateway. Production rejects it at startup.
     simulated-enabled: ${ALIPAY_PLUS_SIMULATED_ENABLED:false}
   stripe:
     # Legacy-only adapter for historical Stripe query/refund liabilities. New payments never use it.

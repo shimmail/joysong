@@ -10,6 +10,7 @@ import com.joysong.server.payment.domain.PaymentCompensation
 import com.joysong.server.payment.domain.PaymentStatus
 import com.joysong.server.payment.domain.PaymentType
 import com.joysong.server.payment.repository.PaymentRepository
+import com.joysong.server.payment.service.DemoPaymentPolicy
 import com.joysong.server.refund.domain.RefundReasonCode
 import com.joysong.server.refund.entity.RefundEntity
 import com.joysong.server.refund.repository.RefundRepository
@@ -48,6 +49,7 @@ class RefundWorkflowPersistenceService(
     private val paymentRepository: PaymentRepository,
     private val businessNotificationDispatcher: RefundBusinessNotificationDispatcher,
     private val refundEvidenceFileService: RefundEvidenceFileService,
+    private val demoPaymentPolicy: DemoPaymentPolicy? = null,
 ) {
     companion object {
         private val log = LoggerFactory.getLogger(RefundWorkflowPersistenceService::class.java)
@@ -146,7 +148,9 @@ class RefundWorkflowPersistenceService(
             listOf(PENDING, PROCESSING, APPROVED)
         ).isEmpty()) { "该订单已有进行中的退款申请，请勿重复提交" }
 
-        val automatic = !isTravelGroundService && current == OrderStatusEnum.CONSULTATION_PAID
+        val automatic = demoPaymentPolicy?.requiresManualRefundReview() != true &&
+            !isTravelGroundService &&
+            current == OrderStatusEnum.CONSULTATION_PAID
         val now = LocalDateTime.now()
         val amountMinor = if (isTravelGroundService) {
             validateServiceFeePayment(order)

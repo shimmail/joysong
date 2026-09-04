@@ -1,8 +1,10 @@
 package com.joysong.server.identity.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.service.AccountLifecycleGuard
+import com.joysong.server.wallet.repository.WalletRepository
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
@@ -48,7 +50,11 @@ import java.util.concurrent.TimeUnit
     ]
 )
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import(AdminIdentityService::class, AdminIdentityServiceMySqlIntegrationTest.TestConfig::class)
+@Import(
+    AdminIdentityService::class,
+    ConsultantInstitutionRelationshipService::class,
+    AdminIdentityServiceMySqlIntegrationTest.TestConfig::class
+)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class AdminIdentityServiceMySqlIntegrationTest {
 
@@ -67,7 +73,7 @@ class AdminIdentityServiceMySqlIntegrationTest {
         insertUser(ADMIN_ID, "13800000102", "集成测试管理员", "ADMIN")
         insertUser(SECOND_ADMIN_ID, "13800000103", "第二管理员", "ADMIN")
         jdbcTemplate.update(
-            "INSERT INTO institutions (id, name) VALUES (?, ?)",
+            "INSERT INTO institutions (id, name, is_verified) VALUES (?, ?, 1)",
             INSTITUTION_ID,
             "Testcontainers 机构"
         )
@@ -126,14 +132,17 @@ class AdminIdentityServiceMySqlIntegrationTest {
     }
 
     @Test
-    fun `Flyway applies B1 baseline followed by production migrations V2 through V10`() {
+    fun `Flyway applies the current baseline followed by current production migrations`() {
         val history = jdbcTemplate.query(
             "SELECT version, type FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank",
             { rs, _ -> FlywayMigration(rs.getString("version"), rs.getString("type")) }
         )
 
-        assertEquals((1..10).map(Int::toString), history.map(FlywayMigration::version))
-        assertEquals("SQL_BASELINE", history.single { it.version == "1" }.type)
+        assertEquals(
+            listOf("33", "34", "35", "36", "37", "38", "39", "40"),
+            history.map(FlywayMigration::version)
+        )
+        assertEquals("SQL_BASELINE", history.single { it.version == "33" }.type)
     }
 
     @Test
@@ -239,6 +248,15 @@ class AdminIdentityServiceMySqlIntegrationTest {
                 UserEntity(id = firstArg(), passwordHash = "test", role = "USER")
             }
         }
+
+        @Bean
+        fun doctorInstitutionRelationshipOperations(): DoctorInstitutionRelationshipOperations = mockk(relaxed = true)
+
+        @Bean
+        fun walletRepository(): WalletRepository = mockk(relaxed = true)
+
+        @Bean
+        fun businessNotificationService(): BusinessNotificationService = mockk(relaxed = true)
     }
 
     companion object {

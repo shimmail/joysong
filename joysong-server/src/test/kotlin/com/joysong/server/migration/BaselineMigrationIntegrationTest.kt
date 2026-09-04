@@ -52,7 +52,7 @@ class BaselineMigrationIntegrationTest {
     private lateinit var institutionProjectRepository: InstitutionProjectRepository
 
     @Test
-    fun `fresh database applies B33 baseline through V38 refund evidence`() {
+    fun `fresh database applies B33 baseline through V40 public upload attempts`() {
         val history = jdbcTemplate.query(
             """
             SELECT version, type, script
@@ -70,13 +70,59 @@ class BaselineMigrationIntegrationTest {
                 Triple("36", "SQL", "V36__add_account_lifecycle_foundation.sql"),
                 Triple("37", "SQL", "V37__add_project_case_counters.sql"),
                 Triple("38", "SQL", "V38__add_refund_evidence_files.sql"),
+                Triple("39", "SQL", "V39__track_private_file_storage_provider.sql"),
+                Triple("40", "SQL", "V40__add_public_upload_attempts.sql"),
             ),
             history,
         )
         assertEquals(
-            listOf("account_deletion_requests", "user_media_assets"),
+            listOf("storage_provider", "varchar", "NO", "LOCAL_PRIVATE"),
+            jdbcTemplate.queryForObject(
+                """
+                SELECT column_name, data_type, is_nullable, column_default
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE() AND table_name = 'private_files'
+                  AND column_name = 'storage_provider'
+                """.trimIndent(),
+            ) { rs, _ ->
+                listOf(
+                    rs.getString("column_name"),
+                    rs.getString("data_type"),
+                    rs.getString("is_nullable"),
+                    rs.getString("column_default"),
+                )
+            },
+        )
+        assertEquals(
+            listOf("storage_provider"),
             jdbcTemplate.queryForList(
-                "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('account_deletion_requests', 'user_media_assets') ORDER BY table_name",
+                """
+                SELECT column_name
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE() AND table_name = 'private_files'
+                  AND index_name = 'idx_private_files_storage_provider'
+                ORDER BY seq_in_index
+                """.trimIndent(),
+                String::class.java,
+            ),
+        )
+        assertEquals(
+            listOf("account_deletion_requests", "public_upload_attempts", "user_media_assets"),
+            jdbcTemplate.queryForList(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('account_deletion_requests', 'public_upload_attempts', 'user_media_assets') ORDER BY table_name",
+                String::class.java,
+            ),
+        )
+        assertEquals(
+            listOf("owner_user_id", "client_upload_id"),
+            jdbcTemplate.queryForList(
+                """
+                SELECT column_name
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE() AND table_name = 'public_upload_attempts'
+                  AND index_name = 'uk_public_upload_owner_client_id'
+                ORDER BY seq_in_index
+                """.trimIndent(),
                 String::class.java,
             ),
         )

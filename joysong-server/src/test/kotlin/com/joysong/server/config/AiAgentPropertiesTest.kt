@@ -1,6 +1,7 @@
 package com.joysong.server.config
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
@@ -268,6 +269,97 @@ class AiAgentPropertiesTest {
         assertEquals("https://dashscope.aliyuncs.com/compatible-mode/v1", properties.baseUrl)
     }
 
+    @ParameterizedTest
+    @ValueSource(
+        strings = [
+            "http://oss-cn-hangzhou-internal.aliyuncs.com",
+            "oss-cn-hangzhou-internal.aliyuncs.com",
+            "https://user:secret@oss-cn-hangzhou-internal.aliyuncs.com",
+            "https://oss-cn-hangzhou-internal.aliyuncs.com?token=secret",
+            "https://oss-cn-hangzhou-internal.aliyuncs.com/#fragment",
+            "https://oss-cn-hangzhou-internal.aliyuncs.com/prefix",
+            "https://storage.example.test",
+            "https://test-bucket.oss-cn-hangzhou.aliyuncs.com",
+        ],
+    )
+    fun `production rejects a non-canonical HTTPS OSS endpoint`(endpoint: String) {
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(
+                validEnabledProperties(),
+                ossEndpoint = endpoint,
+            ).validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("OSS_ENDPOINT"))
+    }
+
+    @Test
+    fun `production rejects a blank OSS region`() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(
+                validEnabledProperties(),
+                ossRegion = " ",
+            ).validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("OSS_REGION"))
+    }
+
+    @Test
+    fun `development also rejects a non-HTTPS OSS endpoint when OSS is enabled`() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(
+                validEnabledProperties(),
+                profile = "dev",
+                ossEndpoint = "http://oss-cn-hangzhou.aliyuncs.com",
+            ).validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("OSS_ENDPOINT"))
+    }
+
+    @Test
+    fun `OSS endpoint region must match the configured signing region`() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(
+                validEnabledProperties(),
+                ossEndpoint = "https://oss-cn-shanghai-internal.aliyuncs.com",
+                ossRegion = "cn-hangzhou",
+            ).validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("OSS_ENDPOINT"))
+    }
+
+    @Test
+    fun `OSS bucket names must follow Alibaba Cloud naming rules`() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(
+                validEnabledProperties(),
+                ossBucketName = "Invalid_Bucket",
+                ossPrivateBucketName = "also_invalid",
+                privateStorageMode = "oss",
+            ).validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("OSS_BUCKET_NAME"))
+        assertTrue(error.message.orEmpty().contains("OSS_PRIVATE_BUCKET_NAME"))
+    }
+
+    @Test
+    fun `private and public bucket comparison ignores surrounding whitespace`() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(
+                validEnabledProperties(),
+                ossBucketName = " test-bucket ",
+                ossPrivateBucketName = "test-bucket",
+                privateStorageMode = "oss",
+            ).validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("must differ from OSS_BUCKET_NAME"))
+    }
+
     @Test
     fun `production rejects a blank diary share base URL`() {
         val error = assertThrows(IllegalStateException::class.java) {
@@ -323,6 +415,58 @@ class AiAgentPropertiesTest {
         assertTrue(error.message.orEmpty().contains("share request-origin fallback"))
     }
 
+    @Test
+    fun `demo profile permits a blank Google client id`() {
+        assertDoesNotThrow {
+            validator(
+                validEnabledProperties(),
+                profile = "demo",
+                googleClientId = "",
+            ).validate()
+        }
+    }
+
+    @Test
+    fun `non-demo profile still requires a Google client id`() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(
+                validEnabledProperties(),
+                profile = "dev",
+                googleClientId = "",
+            ).validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("GOOGLE_CLIENT_ID"))
+    }
+
+    @Test
+    fun `production rejects an enabled Alipay Plus simulator`() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(
+                validEnabledProperties(),
+                alipayPlusSimulatedEnabled = true,
+            ).validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("payment.alipay-plus.simulated-enabled must be false"))
+    }
+
+    @Test
+    fun `production rejects automatic order payment`() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(
+                validEnabledProperties(),
+                alipayPlusAutoPayOnOrderCreateEnabled = true,
+            ).validate()
+        }
+
+        assertTrue(
+            error.message.orEmpty().contains(
+                "payment.alipay-plus.auto-pay-on-order-create-enabled must be false"
+            )
+        )
+    }
+
     private fun validEnabledProperties() = AiAgentProperties(
         provider = AiAgentProvider.QWEN,
         apiKey = "test-key",
@@ -337,14 +481,31 @@ class AiAgentPropertiesTest {
         additionalProfiles: Array<String> = emptyArray(),
         shareBaseUrl: String = "https://share.example.test/s/diary/",
         shareRequestOriginFallbackEnabled: Boolean = false,
+        ossEndpoint: String = "https://oss-cn-hangzhou-internal.aliyuncs.com",
+        ossRegion: String = "cn-hangzhou",
+        ossBucketName: String = "test-bucket",
+        ossPublicBaseUrl: String = "https://test-bucket.oss-cn-hangzhou.aliyuncs.com",
+        ossCredentialMode: String = "static",
+        ossEcsRamRoleName: String = "",
+        ossPrivateBucketName: String = "test-private-bucket",
+        privateStorageMode: String = "local",
+        googleClientId: String = "test-google-client-id",
+        alipayPlusSimulatedEnabled: Boolean = false,
+        alipayPlusAutoPayOnOrderCreateEnabled: Boolean = false,
     ): ConfigValidator = ConfigValidator(
         environment = MockEnvironment().apply { setActiveProfiles(profile, *additionalProfiles) },
         jwtSecret = "test-jwt-secret-that-is-at-least-32-characters",
-        googleClientId = "test-google-client-id",
+        googleClientId = googleClientId,
         ossAccessKeyId = "test-oss-key",
         ossAccessKeySecret = "test-oss-secret",
-        ossEndpoint = "oss.example.test",
-        ossBucketName = "test-bucket",
+        ossEndpoint = ossEndpoint,
+        ossBucketName = ossBucketName,
+        ossRegion = ossRegion,
+        ossPublicBaseUrl = ossPublicBaseUrl,
+        ossCredentialMode = ossCredentialMode,
+        ossEcsRamRoleName = ossEcsRamRoleName,
+        ossPrivateBucketName = ossPrivateBucketName,
+        privateStorageMode = privateStorageMode,
         smsAccessKeyId = "test-sms-key",
         smsAccessKeySecret = "test-sms-secret",
         smsSignName = "test-sign",
@@ -357,6 +518,8 @@ class AiAgentPropertiesTest {
         logVerificationCodeForDev = false,
         shareBaseUrl = shareBaseUrl,
         shareRequestOriginFallbackEnabled = shareRequestOriginFallbackEnabled,
+        alipayPlusSimulatedEnabled = alipayPlusSimulatedEnabled,
+        alipayPlusAutoPayOnOrderCreateEnabled = alipayPlusAutoPayOnOrderCreateEnabled,
     )
 
     private fun Throwable?.causeChain(): String = generateSequence(this) { it.cause }

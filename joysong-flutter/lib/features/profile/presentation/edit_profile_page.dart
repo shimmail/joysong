@@ -9,6 +9,7 @@ import 'package:joysong_flutter/features/profile/presentation/profile_controller
 import 'package:joysong_flutter/features/profile/presentation/avatar_crop_page.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/domain/social_repository.dart';
+import 'package:joysong_flutter/features/social/presentation/public_upload_controller.dart';
 
 class EditProfilePage extends StatefulWidget {
   const EditProfilePage({
@@ -34,6 +35,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   late String _avatarUrl;
   Uint8List? _avatarBytes;
   bool _uploadingAvatar = false;
+  final PublicMediaUploadScope _publicMediaUploads = PublicMediaUploadScope();
 
   @override
   void initState() {
@@ -49,6 +51,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   @override
   void dispose() {
+    _publicMediaUploads.dispose();
     _nicknameController.dispose();
     _cityController.dispose();
     _bioController.dispose();
@@ -240,23 +243,49 @@ class _EditProfilePageState extends State<EditProfilePage> {
   }
 
   Future<void> _pickAvatar() async {
-    final selected = await const AppFilePicker().pickImage();
-    if (selected == null || !mounted) return;
-    final cropped = await Navigator.of(context).push<Uint8List>(
-      MaterialPageRoute(builder: (_) => AvatarCropPage(bytes: selected.bytes)),
-    );
+    const picker = AppFilePicker();
+    final socialRepository = widget.socialRepository;
+    if (socialRepository == null) return;
+    final selected = await picker.pickImage();
+    if (selected == null) return;
+    Uint8List? cropped;
+    try {
+      if (!mounted) return;
+      final selectedBytes = await selected.readBytes();
+      if (!mounted) return;
+      cropped = await Navigator.of(context).push<Uint8List>(
+        MaterialPageRoute(
+          builder: (_) => AvatarCropPage(bytes: selectedBytes),
+        ),
+      );
+    } finally {
+      await selected.deleteLocalFile();
+    }
     if (cropped == null || !mounted) return;
-    setState(() => _uploadingAvatar = true);
+    final prepared = await picker.preparePublicImageBytes(
+      cropped,
+      fileName: 'avatar.png',
+    );
     String? url;
-    await for (final progress in widget.socialRepository!.uploadPublicMedia(
-      PublicMediaDraft(
-        bytes: cropped,
-        fileName: 'avatar.png',
-        mimeType: 'image/png',
-        purpose: PublicMediaPurpose.avatar,
-      ),
-    )) {
+    try {
+      if (!mounted) return;
+      final localPath = prepared.localPath;
+      if (localPath == null) return;
+      setState(() => _uploadingAvatar = true);
+      final progress = await _publicMediaUploads.upload(
+        socialRepository,
+        PublicMediaDraft(
+          uploadId: prepared.uploadId,
+          localPath: localPath,
+          byteLength: prepared.byteLength,
+          fileName: prepared.fileName,
+          mimeType: prepared.mimeType,
+          purpose: PublicMediaPurpose.avatar,
+        ),
+      );
       if (progress.stage == UploadStage.complete) url = progress.url;
+    } finally {
+      await prepared.deleteLocalFile();
     }
     if (!mounted) return;
     setState(() {
