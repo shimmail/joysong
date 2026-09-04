@@ -125,6 +125,7 @@ class AgentV2MySqlIntegrationTest {
     @Test
     fun `already V10 agent turns schema upgrades with the turn lease column`() {
         val upgradeFlyway = Flyway.configure()
+            .configuration(mapOf("flyway.baselineMigrationPrefix" to "DISABLED"))
             .dataSource(upgradeMysql.jdbcUrl, upgradeMysql.username, upgradeMysql.password)
             .locations("classpath:db/migration")
             .target("10")

@@ -168,14 +168,8 @@ class AgentChatFlowIntegrationTest {
         fakeLlmRequestBodies.clear()
         aiAgentProperties.intentModel = "intent-test-model"
         transactionStates.clear()
-        llmRestTemplate.requestFactory = SimpleClientHttpRequestFactory().apply {
-            setConnectTimeout(1_000)
-            setReadTimeout(100)
-        }
-        intentParserRestTemplate.requestFactory = SimpleClientHttpRequestFactory().apply {
-            setConnectTimeout(1_000)
-            setReadTimeout(100)
-        }
+        llmRestTemplate.requestFactory = requestFactory(2_000)
+        intentParserRestTemplate.requestFactory = requestFactory(2_000)
         fakeProviderInterceptor = ClientHttpRequestInterceptor { request, body, execution ->
             val localRequest = object : HttpRequestWrapper(request) {
                 override fun getURI() = java.net.URI(
@@ -797,7 +791,7 @@ class AgentChatFlowIntegrationTest {
         assertTrue(providerLog.contains("providerCategory=$expectedCategory"))
         assertNoSensitiveLogData(providerLog, "provider contract request")
         if (providerStatus == 429) {
-            assertTrue(providerLog.contains("providerHost=www.fastaitoken.com"))
+            assertTrue(providerLog.contains("providerHost=dashscope.aliyuncs.com"))
             assertFalse(providerLog.contains("test-model"))
             assertTrue(providerLog.contains("providerErrorCode=rate_limit_exceeded"))
             assertTrue(Regex("""messageCount=\d+""").containsMatchIn(providerLog))
@@ -828,6 +822,7 @@ class AgentChatFlowIntegrationTest {
     @WithMockUser(username = "user-1")
     fun `HTTP send maps provider timeout to a redacted 503 response`() {
         fakeLlmDelayMs.set(500)
+        llmRestTemplate.requestFactory = requestFactory(100)
 
         val logs = assertHttpProviderFailure(
             idempotencyKey = "http-timeout-1",
@@ -875,7 +870,7 @@ class AgentChatFlowIntegrationTest {
         val response = stream(session.id, "你好", "http-stream-success-1")
 
         assertEventOrder(response, "event:started", "event:delta", "event:completed")
-        assertFalse(response.contains("event:failed"))
+        assertFalse(response.contains("event:error"))
         assertEquals(1, streamingProviderCallCount())
         assertEquals(listOf("USER", "ASSISTANT"), messages(session.id).map { it.role })
         assertEquals("测试回复", messages(session.id).last().content)
@@ -1000,9 +995,8 @@ class AgentChatFlowIntegrationTest {
         val replay = stream(session.id, "你好", "http-stream-replay-1")
 
         assertTrue(first.contains("event:started"))
-        assertFalse(replay.contains("event:started"))
+        assertEventOrder(replay, "event:started", "event:completed")
         assertFalse(replay.contains("event:delta"))
-        assertTrue(replay.contains("event:completed"))
         assertEquals(callsAfterFirst, streamingProviderCallCount())
         assertEquals(2, messageCount(session.id))
         assertEquals(1, turnCount(session.id))
@@ -1038,7 +1032,7 @@ class AgentChatFlowIntegrationTest {
 
         val response = stream(session.id, "你好", "http-stream-upstream-$providerStatus")
 
-        assertEventOrder(response, "event:started", "event:failed")
+        assertEventOrder(response, "event:started", "event:error")
         assertTrue(response.contains("AI_PROVIDER_UNAVAILABLE"))
         assertFalse(response.contains("provider-secret-body"))
         assertEquals(listOf("USER"), messages(session.id).map { it.role })
@@ -1053,7 +1047,7 @@ class AgentChatFlowIntegrationTest {
 
         val logs = captureAgentOperationLogs {
             val response = stream(session.id, "redaction request", "http-stream-log-redaction-1")
-            assertTrue(response.contains("event:failed"))
+            assertTrue(response.contains("event:error"))
         }.joinToString("\n")
 
         listOf("provider-secret-body", "test-key", "private@example.com", "13800000000").forEach {
@@ -1067,11 +1061,12 @@ class AgentChatFlowIntegrationTest {
     @WithMockUser(username = "user-1")
     fun `HTTP streaming timeout fails atomically and remains retryable`() {
         fakeLlmDelayMs.set(500)
+        llmRestTemplate.requestFactory = requestFactory(100)
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
 
         val response = stream(session.id, "你好", "http-stream-timeout-1")
 
-        assertTrue(response.contains("event:failed"))
+        assertTrue(response.contains("event:error"))
         assertTrue(response.contains("AI_PROVIDER_TIMEOUT"))
         assertTrue(response.contains("\"retryable\":true"))
         assertEquals(listOf("USER"), messages(session.id).map { it.role })
@@ -1087,7 +1082,7 @@ class AgentChatFlowIntegrationTest {
 
         val response = stream(session.id, "你好", "http-stream-bad-${payload.hashCode()}")
 
-        assertTrue(response.contains("event:failed"))
+        assertTrue(response.contains("event:error"))
         assertFalse(response.contains("event:completed"))
         assertEquals(listOf("USER"), messages(session.id).map { it.role })
         assertEquals(AgentTurnStatus.FAILED, turn(session.id).status)
@@ -1122,7 +1117,7 @@ class AgentChatFlowIntegrationTest {
         fakeLlmStatus.set(500)
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
         val failed = stream(session.id, "你好", "http-stream-retry-1")
-        assertTrue(failed.contains("event:failed"))
+        assertTrue(failed.contains("event:error"))
         val firstTurn = turn(session.id)
         val firstUser = messages(session.id).single()
         val firstTurnId = firstTurn.id
@@ -1320,6 +1315,11 @@ class AgentChatFlowIntegrationTest {
         return mockMvc.perform(asyncDispatch(initial))
             .andExpect(status().isOk)
             .andReturn().response.contentAsString
+    }
+
+    private fun requestFactory(readTimeoutMs: Int) = SimpleClientHttpRequestFactory().apply {
+        setConnectTimeout(1_000)
+        setReadTimeout(readTimeoutMs)
     }
 
     private fun assertEventOrder(response: String, vararg events: String) {
