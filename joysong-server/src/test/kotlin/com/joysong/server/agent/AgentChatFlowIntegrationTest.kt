@@ -57,6 +57,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
+import org.springframework.context.i18n.LocaleContextHolder
 import org.springframework.http.MediaType
 import org.springframework.http.client.SimpleClientHttpRequestFactory
 import org.springframework.http.client.support.HttpRequestWrapper
@@ -83,6 +84,7 @@ import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import java.nio.file.Paths
 import java.time.LocalDateTime
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
@@ -550,6 +552,8 @@ class AgentChatFlowIntegrationTest {
         )
         val bypassReply = "结合你可接受3天恢复和低痛偏好，A排在第一位，建议选择A"
         fakeLlmContent.set(bypassReply)
+        val previousLocale = LocaleContextHolder.getLocale()
+        LocaleContextHolder.setLocale(Locale.ENGLISH)
 
         try {
             val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
@@ -581,7 +585,9 @@ class AgentChatFlowIntegrationTest {
                 safeReply,
                 messageRepository.findBySessionIdOrderBySequenceNoAsc(session.id).last().content
             )
+            assertEquals(Locale.ENGLISH, LocaleContextHolder.getLocale())
         } finally {
+            LocaleContextHolder.setLocale(previousLocale)
             doctorProjectRepository.delete(binding)
             doctorInstitutionRepository.delete(relation)
             institutionProjectRepository.delete(offering)

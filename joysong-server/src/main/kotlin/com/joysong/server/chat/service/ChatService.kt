@@ -572,8 +572,8 @@ class ChatService(
         val context = agentContextBuilder.load(userId, sessionId, 20, 4_000)
         val session = sessionRepository.findByIdAndUserIdAndDeletedAtIsNull(sessionId, userId)
             ?: throw AgentChatException("SESSION_NOT_FOUND", begin.traceId)
-        val generated = withCurrentTurnLanguage(content) {
-            generateTurn(
+        return withCurrentTurnLanguage(content) {
+            val generated = generateTurn(
                 session = session,
                 content = content,
                 historyMessages = context.messages,
@@ -582,15 +582,15 @@ class ChatService(
                 providerCallContext = ProviderCallContext(begin.traceId, begin.turnId),
                 llmCaller = llmCaller
             )
+            completeGeneratedTurn(
+                turnId = begin.turnId,
+                traceId = begin.traceId,
+                sessionId = sessionId,
+                startedAt = totalStartedAt,
+                generated = generated,
+                conversationFocusUpdate = conversationFocusUpdate(session, content, generated)
+            )
         }
-        return completeGeneratedTurn(
-            turnId = begin.turnId,
-            traceId = begin.traceId,
-            sessionId = sessionId,
-            startedAt = totalStartedAt,
-            generated = generated,
-            conversationFocusUpdate = conversationFocusUpdate(session, content, generated)
-        )
     }
 
     private fun completeGeneratedTurn(
