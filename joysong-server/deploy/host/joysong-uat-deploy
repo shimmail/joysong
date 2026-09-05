@@ -1,0 +1,1157 @@
+#!/bin/bash
+set -Eeuo pipefail
+umask 077
+
+# Re-exec the installed root-owned entrypoint with a minimal environment before
+# touching any host resource. This removes runner-controlled import, proxy and
+# tool configuration variables at the privilege boundary.
+if [[ "$EUID" -eq 0 && "${JOYSONG_UAT_ENV_SANITIZED:-}" != 1 ]]; then
+  exec /usr/bin/env -i \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    LC_ALL=C JOYSONG_UAT_ENV_SANITIZED=1 \
+    /bin/bash /usr/local/sbin/joysong-uat-deploy "$@"
+fi
+
+# This is the only privileged interface exposed to the repository runner. The
+# workflow can choose an immutable candidate identity; every host resource is
+# fixed here and cannot be supplied by CI.
+readonly SERVICE=joysong-demo.service
+readonly SERVICE_USER=joysong-demo
+readonly SERVICE_GROUP=joysong-demo
+readonly RUNNER_USER=joysong-gh-runner
+readonly PORT=8080
+readonly ADMIN_HOST=joyingsong.net
+readonly HEALTH_TIMEOUT_SECONDS=90
+readonly OUTAGE_LIMIT_SECONDS=180
+readonly RECOVERY_RESERVE_SECONDS=90
+readonly COMMAND_TIMEOUT_SECONDS=15
+readonly CAPACITY_RESERVE_BYTES=536870912
+readonly PUBLIC_BUCKET=joysong-demo-media-cn-hangzhou-1335549182926992
+readonly PRIVATE_BUCKET=joysong-demo-private-cn-hangzhou-1335549182926992
+readonly EXPECTED_DATABASE_NAME=myapp_worktree_uat
+readonly EMPTY_DATABASE_SHA256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+fail() {
+  printf 'JoySong UAT deployment failed: %s\n' "$*" >&2
+  exit 2
+}
+
+# Production sudo strips these test-only variables. Direct root execution also
+# refuses them, so a workflow cannot redirect privileged paths into a fixture.
+if [[ -n "${JOYSONG_UAT_TEST_ROOT:-}" ]]; then
+  [[ "${JOYSONG_UAT_TESTING:-}" == 1 && "$EUID" -ne 0 ]] ||
+    fail "test path override is forbidden for root or outside the test harness"
+  readonly PATH_PREFIX="${JOYSONG_UAT_TEST_ROOT%/}"
+  readonly PYTHON_BIN=python3
+else
+  [[ "$EUID" -eq 0 ]] || fail "run as root through the fixed sudoers entry"
+  readonly PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  export PATH
+  readonly PATH_PREFIX=""
+  readonly PYTHON_BIN=/usr/bin/python3
+  cd /
+fi
+
+host_path() { printf '%s%s' "$PATH_PREFIX" "$1"; }
+
+BACKEND_ROOT="$(host_path /opt/joysong-demo)"
+readonly BACKEND_ROOT
+readonly BACKEND_RELEASES="$BACKEND_ROOT/releases"
+readonly BACKEND_CURRENT="$BACKEND_ROOT/current"
+readonly BACKEND_PREVIOUS="$BACKEND_ROOT/previous"
+ADMIN_ROOT="$(host_path /var/www/joysong-demo)"
+readonly ADMIN_ROOT
+readonly ADMIN_RELEASES="$ADMIN_ROOT/releases"
+readonly ADMIN_CURRENT="$ADMIN_ROOT/current"
+readonly ADMIN_PREVIOUS="$ADMIN_ROOT/previous"
+DATA_ROOT="$(host_path /var/lib/joysong-demo)"
+readonly DATA_ROOT
+readonly UPLOADS="$DATA_ROOT/uploads"
+readonly PRIVATE_DATA="$DATA_ROOT/private"
+readonly STAGING_DATA="$DATA_ROOT/upload-staging"
+CONFIG_FILE="$(host_path /etc/joysong-demo/joysong.env)"
+MYSQL_CONFIG="$(host_path /etc/mysql/joysong-uat-backup.cnf)"
+NGINX_SITE="$(host_path /etc/nginx/conf.d/joysong-public.conf)"
+SYSTEMD_UNIT="$(host_path /etc/systemd/system/joysong-demo.service)"
+HOST_CONTRACT="$(host_path /etc/joysong-demo/host-contract)"
+DEPLOY_ROOT="$(host_path /var/lib/joysong-deploy)"
+readonly CONFIG_FILE MYSQL_CONFIG NGINX_SITE SYSTEMD_UNIT HOST_CONTRACT DEPLOY_ROOT
+readonly STATE_ROOT="$DEPLOY_ROOT/state"
+readonly BACKUP_ROOT="$DEPLOY_ROOT/backups"
+readonly INCOMING_ROOT="$DEPLOY_ROOT/incoming"
+readonly LOCK_FILE="$STATE_ROOT/deploy.lock"
+readonly TRANSACTION_MARKER="$STATE_ROOT/transaction"
+readonly PREVIOUS_IDENTITY="$STATE_ROOT/previous-pair"
+readonly LEGACY_ADOPTION_PENDING="$STATE_ROOT/legacy-backend-adoption.pending"
+VERIFY_TOOL="$(host_path /usr/local/lib/joysong-deploy/verify-uat-release.py)"
+readonly VERIFY_TOOL
+
+TAG_RE='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-uat\.(0|[1-9][0-9]*)$'
+SHA64_RE='^[0-9a-f]{64}$'
+COMMIT_RE='^[0-9a-f]{40}$'
+RUN_ID_RE='^[1-9][0-9]{0,18}$'
+readonly RUN_ID_MAX=9223372036854775807
+
+validate_arguments() {
+  (($# == 5)) || fail "expected action, tag, commit, run ID and bundle SHA-256"
+  [[ "$1" == preflight || "$1" == deploy ]] || fail "unsupported action"
+  [[ "$2" =~ $TAG_RE ]] || fail "invalid UAT tag"
+  [[ "$3" =~ $COMMIT_RE ]] || fail "commit must be 40 lowercase hexadecimal characters"
+  [[ "$4" =~ $RUN_ID_RE ]] || fail "run ID must be a positive decimal integer"
+  if ((${#4} == 19)); then
+    ((10#$4 <= RUN_ID_MAX)) || fail "run ID exceeds signed 64-bit range"
+  fi
+  [[ "$5" =~ $SHA64_RE ]] || fail "bundle SHA-256 must be 64 lowercase hexadecimal characters"
+}
+
+mode_not_writable_by_group_or_other() {
+  local mode="$1"
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] && (((8#$mode & 8#022) == 0))
+}
+
+require_regular_file() {
+  local path="$1" label="$2"
+  [[ -f "$path" && ! -L "$path" ]] || fail "$label must be a regular non-link file"
+  [[ "$(stat -c '%h' "$path")" == 1 ]] || fail "$label must not have multiple hard links"
+}
+
+require_root_protected_file() {
+  local path="$1" label="$2"
+  require_regular_file "$path" "$label"
+  if [[ -z "$PATH_PREFIX" ]]; then
+    [[ "$(stat -c '%U' "$path")" == root ]] || fail "$label must be root-owned"
+    mode_not_writable_by_group_or_other "$(stat -c '%a' "$path")" ||
+      fail "$label must not be writable by group or other"
+  fi
+}
+
+require_real_directory() {
+  local path="$1" label="$2"
+  [[ -d "$path" && ! -L "$path" ]] || fail "$label must be a real directory"
+}
+
+validate_control_layout() {
+  local directory
+  for directory in "$BACKEND_ROOT" "$BACKEND_RELEASES" "$ADMIN_ROOT" "$ADMIN_RELEASES" \
+    "$DEPLOY_ROOT" "$STATE_ROOT" "$BACKUP_ROOT" "$INCOMING_ROOT"; do
+    require_real_directory "$directory" "controlled directory $directory"
+    if [[ -z "$PATH_PREFIX" && "$directory" != "$INCOMING_ROOT" ]]; then
+      [[ "$(stat -c '%U' "$directory")" == root ]] || fail "$directory must be root-owned"
+      mode_not_writable_by_group_or_other "$(stat -c '%a' "$directory")" ||
+        fail "$directory must not be writable by group or other"
+    fi
+  done
+  require_root_protected_file "$LOCK_FILE" "deployment lock"
+  require_root_protected_file "$VERIFY_TOOL" "release verifier"
+  if [[ -z "$PATH_PREFIX" ]]; then
+    [[ "$(stat -c '%U:%G:%a' "$INCOMING_ROOT")" == "$RUNNER_USER:$RUNNER_USER:700" ]] ||
+      fail "incoming root must be joysong-gh-runner:joysong-gh-runner mode 0700"
+  fi
+  [[ ! -e "$TRANSACTION_MARKER" && ! -L "$TRANSACTION_MARKER" ]] ||
+    fail "an unresolved deployment transaction blocks new work"
+  [[ ! -e "$LEGACY_ADOPTION_PENDING" && ! -L "$LEGACY_ADOPTION_PENDING" ]] ||
+    fail "an unresolved legacy Backend adoption blocks new work"
+}
+
+read_assignment() {
+  local file="$1" key="$2" line value
+  line="$(grep -E "^[[:space:]]*${key}=" "$file" | tail -n 1 || true)"
+  [[ -n "$line" ]] || return 1
+  value="${line#*=}"
+  value="${value%$'\r'}"
+  if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+file_sha() { sha256sum "$1" | awk '{print $1}'; }
+
+tree_sha() {
+  "$PYTHON_BIN" -I - "$@" <<'PY'
+from __future__ import print_function
+import hashlib, os, stat, sys
+root = os.path.realpath(sys.argv[1])
+require_root_immutable = len(sys.argv) > 2 and sys.argv[2] == "true"
+root_info = os.lstat(sys.argv[1])
+if stat.S_ISLNK(root_info.st_mode) or not stat.S_ISDIR(root_info.st_mode):
+    raise SystemExit("tree root is unsafe")
+if require_root_immutable and (
+    root_info.st_uid != 0 or stat.S_IMODE(root_info.st_mode) & 0o022
+):
+    raise SystemExit("release tree root is mutable to a non-root user")
+digest = hashlib.sha256()
+for parent, directories, files in os.walk(root, followlinks=False):
+    directories.sort(); files.sort()
+    for name in directories + files:
+        path = os.path.join(parent, name)
+        info = os.lstat(path)
+        if stat.S_ISLNK(info.st_mode) or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+            raise SystemExit("tree contains a link or special file")
+        if stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
+            raise SystemExit("tree contains a multiply-linked file")
+        if require_root_immutable and (
+            info.st_uid != 0 or stat.S_IMODE(info.st_mode) & 0o022
+        ):
+            raise SystemExit("release tree is mutable to a non-root user")
+        relative = os.path.relpath(path, root).replace(os.sep, "/")
+        digest.update(relative.encode("utf-8")); digest.update(b"\0")
+        digest.update(("%o:%d:%d" % (stat.S_IMODE(info.st_mode), info.st_uid, info.st_gid)).encode("ascii"))
+        digest.update(b"\0")
+        if stat.S_ISREG(info.st_mode):
+            member = hashlib.sha256()
+            with open(path, "rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    member.update(chunk)
+            digest.update(member.digest())
+print(digest.hexdigest())
+PY
+}
+
+immutable_tree_sha() { tree_sha "$1" true; }
+
+safe_link_target() {
+  local link="$1" releases="$2" target releases_real
+  [[ -L "$link" ]] || fail "required release link is missing: $link"
+  target="$(readlink -f "$link" 2>/dev/null || true)"
+  releases_real="$(readlink -f "$releases" 2>/dev/null || true)"
+  [[ -n "$target" && -n "$releases_real" && -d "$target" && ! -L "$target" ]] ||
+    fail "release link target is missing or unsafe: $link"
+  [[ "$(dirname "$target")" == "$releases_real" && "$(basename "$target")" != .* ]] ||
+    fail "release link escapes the fixed releases directory: $link"
+  if [[ -z "$PATH_PREFIX" ]]; then
+    [[ "$(stat -c '%U' "$target")" == root ]] || fail "release target must be root-owned"
+    mode_not_writable_by_group_or_other "$(stat -c '%a' "$target")" ||
+      fail "release target must be immutable to non-root users"
+  fi
+  printf '%s' "$target"
+}
+
+atomic_link() {
+  local target="$1" link="$2" temporary="${2}.new.$$"
+  rm -f -- "$temporary"
+  ln -s -- "$target" "$temporary"
+  mv -Tf -- "$temporary" "$link"
+}
+
+atomic_root_file() {
+  local destination="$1" source="$2" temporary="${1}.new.$$"
+  if [[ -n "$PATH_PREFIX" ]]; then
+    install -m 0600 "$source" "$temporary"
+  else
+    install -o root -g root -m 0600 "$source" "$temporary"
+  fi
+  mv -Tf -- "$temporary" "$destination"
+}
+
+run_with_timeout() {
+  local seconds="$1" remaining
+  shift
+  if ((ACTIVE_DEADLINE > 0)); then
+    remaining=$((ACTIVE_DEADLINE - SECONDS))
+    ((remaining > 0)) || return 124
+    ((seconds <= remaining)) || seconds="$remaining"
+  fi
+  if [[ -n "$PATH_PREFIX" ]]; then
+    "$@"
+  else
+    timeout --foreground --signal=TERM --kill-after=3s "${seconds}s" "$@"
+  fi
+}
+
+DATABASE_HOST=''
+DATABASE_PORT=''
+DATABASE_NAME=''
+
+load_database_binding() {
+  local url configured_name selected_name
+  local -a parts
+  url="$(read_assignment "$CONFIG_FILE" DB_URL || true)"
+  [[ -n "$url" ]] || fail "DB_URL is missing from runtime configuration"
+  mapfile -t parts < <("$PYTHON_BIN" -I - "$url" "$EXPECTED_DATABASE_NAME" <<'PY'
+from __future__ import print_function
+import re, sys
+try:
+    from urllib.parse import parse_qsl, urlsplit
+except ImportError:
+    from urlparse import parse_qsl, urlsplit
+value, expected_name = sys.argv[1:]
+if not value.startswith("jdbc:mysql://"):
+    raise SystemExit("DB_URL is not MySQL")
+parsed = urlsplit("mysql://" + value[len("jdbc:mysql://"):])
+name = parsed.path.lstrip("/")
+if parsed.username or parsed.password or not parsed.hostname:
+    raise SystemExit("DB_URL authority is unsafe")
+for key, setting in parse_qsl(parsed.query, keep_blank_values=True):
+    if key.lower() == "createdatabaseifnotexist" and setting.lower() in ("1", "true", "yes", "on"):
+        raise SystemExit("DB_URL must not create a database")
+if name != expected_name:
+    raise SystemExit("database name is not the fixed UAT database")
+print(parsed.hostname); print(parsed.port or 3306); print(name)
+PY
+  )
+  ((${#parts[@]} == 3)) || fail "database binding could not be resolved"
+  DATABASE_HOST="${parts[0]}"; DATABASE_PORT="${parts[1]}"; DATABASE_NAME="${parts[2]}"
+  configured_name="$(read_assignment "$CONFIG_FILE" DEMO_DATABASE_NAME || true)"
+  [[ "$configured_name" == "$DATABASE_NAME" ]] ||
+    fail "DEMO_DATABASE_NAME does not match the DB_URL database"
+  selected_name="$(mysql_query 'SELECT DATABASE()')" || fail "database identity query failed"
+  [[ "$selected_name" == "$DATABASE_NAME" ]] || fail "connected database identity does not match DB_URL"
+  printf 'Resolved database host: %s\nResolved database name: %s\n' "$DATABASE_HOST" "$DATABASE_NAME"
+}
+
+mysql_query() {
+  local statement="$1"
+  run_with_timeout 30 mysql --defaults-file="$MYSQL_CONFIG" --protocol=TCP \
+    --host="$DATABASE_HOST" --port="$DATABASE_PORT" --database="$DATABASE_NAME" \
+    --batch --skip-column-names --execute="$statement"
+}
+
+flyway_snapshot() {
+  local output
+  output="$(mysql_query "SELECT installed_rank,COALESCE(version,''),type,script,COALESCE(checksum,''),success FROM flyway_schema_history ORDER BY installed_rank")" || return 1
+  "$PYTHON_BIN" -I -c '
+from __future__ import print_function
+import csv, hashlib, io, sys
+rows = list(csv.reader(io.StringIO(sys.stdin.read()), delimiter="\t"))
+expected = [str(value) for value in range(33, 41)]
+if len(rows) != 8 or any(len(row) != 6 for row in rows):
+    raise SystemExit("Flyway history must contain exactly B33 and V34 through V40")
+if [row[1] for row in rows] != expected or any(row[5] != "1" for row in rows):
+    raise SystemExit("Flyway history version or success state is invalid")
+if rows[0][2].upper() != "SQL_BASELINE" or any(row[2].upper() != "SQL" for row in rows[1:]):
+    raise SystemExit("Flyway history types must be SQL_BASELINE then SQL")
+normalized = "\n".join("\t".join(row) for row in rows) + "\n"
+print(hashlib.sha256(normalized.encode("utf-8")).hexdigest())
+' <<<"$output"
+}
+
+database_state_snapshot() {
+  local table_count
+  table_count="$(mysql_query "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()")" || return 1
+  [[ "$table_count" =~ ^[0-9]+$ ]] || return 1
+  if [[ "$table_count" == 0 ]]; then
+    printf '%s\n' "$EMPTY_DATABASE_SHA256"
+  else
+    flyway_snapshot
+  fi
+}
+
+nginx_config_sha() {
+  require_root_protected_file "$NGINX_SITE" "Nginx JoySong configuration"
+  local actual expected
+  actual="$(file_sha "$NGINX_SITE")"
+  expected="$(read_assignment "$HOST_CONTRACT" NGINX_SITE_SHA256 || true)"
+  [[ "$expected" =~ $SHA64_RE && "$actual" == "$expected" ]] || return 1
+  printf '%s' "$actual"
+}
+
+validate_mysql_option_file() {
+  "$PYTHON_BIN" -I - "$MYSQL_CONFIG" "$EXPECTED_DATABASE_NAME" <<'PY'
+from __future__ import print_function
+import configparser, re, sys
+path, expected_database = sys.argv[1:]
+parser = configparser.RawConfigParser(interpolation=None, strict=True, allow_no_value=False)
+try:
+    with open(path, encoding="utf-8") as stream:
+        parser.read_file(stream)
+except (OSError, configparser.Error) as error:
+    raise SystemExit("invalid MySQL option file: {}".format(error))
+if parser.sections() != ["client"]:
+    raise SystemExit("MySQL option file must contain only [client]")
+allowed = {"host", "port", "protocol", "user", "password", "database"}
+keys = set(parser["client"])
+if not keys <= allowed or not {"host", "port", "user", "password", "database"} <= keys:
+    raise SystemExit("MySQL option file contains missing or forbidden keys")
+section = parser["client"]
+if section["host"] != "127.0.0.1" or section["port"] != "3306" or section["database"] != expected_database:
+    raise SystemExit("MySQL option file must select the local UAT database")
+if section.get("protocol", "TCP").upper() != "TCP":
+    raise SystemExit("MySQL option file protocol must be TCP")
+if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,31}", section["user"]) or not section["password"]:
+    raise SystemExit("MySQL backup credential is invalid")
+PY
+}
+
+validate_runtime_configuration() {
+  require_root_protected_file "$CONFIG_FILE" "runtime configuration"
+  require_root_protected_file "$MYSQL_CONFIG" "database backup configuration"
+  require_root_protected_file "$HOST_CONTRACT" "host contract"
+  validate_mysql_option_file
+  if [[ -z "$PATH_PREFIX" ]]; then
+    [[ "$(stat -c '%U:%G:%a' "$MYSQL_CONFIG")" == root:root:600 ]] ||
+      fail "database backup configuration must be root:root mode 0600"
+    if command -v getenforce >/dev/null 2>&1; then
+      [[ "$(getenforce)" == Disabled ]] ||
+        fail "the current UAT layout requires SELinux to remain disabled"
+    fi
+  fi
+  [[ "$(read_assignment "$CONFIG_FILE" SPRING_PROFILES_ACTIVE || true)" == demo ]] ||
+    fail "runtime profile must remain demo"
+  [[ "$(read_assignment "$CONFIG_FILE" SERVER_ADDRESS || true)" == 127.0.0.1 ]] ||
+    fail "backend address must remain 127.0.0.1"
+  [[ "$(read_assignment "$CONFIG_FILE" SERVER_PORT || true)" == "$PORT" ]] ||
+    fail "backend port must remain 8080"
+  [[ "$(read_assignment "$CONFIG_FILE" UPLOAD_LOCAL_DIR || true)" == /var/lib/joysong-demo/uploads ]] ||
+    fail "upload directory changed unexpectedly"
+  [[ "$(read_assignment "$CONFIG_FILE" UPLOAD_PRIVATE_DIR || true)" == /var/lib/joysong-demo/private ]] ||
+    fail "private directory changed unexpectedly"
+  [[ "$(read_assignment "$CONFIG_FILE" UPLOAD_STAGING_DIR || true)" == /var/lib/joysong-demo/upload-staging ]] ||
+    fail "upload staging directory changed unexpectedly"
+  [[ "$(read_assignment "$CONFIG_FILE" OSS_BUCKET_NAME || true)" == "$PUBLIC_BUCKET" ]] ||
+    fail "public business Bucket binding changed unexpectedly"
+  [[ "$(read_assignment "$CONFIG_FILE" OSS_PRIVATE_BUCKET_NAME || true)" == "$PRIVATE_BUCKET" ]] ||
+    fail "private business Bucket binding changed unexpectedly"
+  require_real_directory "$UPLOADS" "uploads directory"
+  require_real_directory "$PRIVATE_DATA" "private directory"
+  require_real_directory "$STAGING_DATA" "upload staging directory"
+}
+
+systemctl_property() {
+  local property="$1" line
+  line="$(run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl show "$SERVICE" -p "$property" --no-pager)" || return 1
+  [[ "$line" == "$property="* ]] || return 1
+  printf '%s' "${line#*=}"
+}
+
+systemd_contract_sha() {
+  local working environment_line environment_file fragment drop_ins command_line digest expected
+  working="$(systemctl_property WorkingDirectory)" || return 1
+  environment_line="$(run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl show "$SERVICE" -p EnvironmentFiles --no-pager)" || return 1
+  [[ "$environment_line" == EnvironmentFiles=* ]] || return 1
+  environment_file="${environment_line#EnvironmentFiles=}"
+  fragment="$(systemctl_property FragmentPath)" || return 1
+  drop_ins="$(systemctl_property DropInPaths)" || return 1
+  command_line="$(systemctl_property ExecStart)" || return 1
+  [[ "$working" == /opt/joysong-demo/current ]] || return 1
+  [[ "$environment_file" == '/etc/joysong-demo/joysong.env (ignore_errors=no)' ]] || return 1
+  [[ "$fragment" == /etc/systemd/system/joysong-demo.service && -z "$drop_ins" ]] || return 1
+  [[ "$command_line" == *'path=/usr/bin/java ;'* ]] || return 1
+  [[ "$command_line" == *'argv[]=/usr/bin/java -Xms256m -Xmx896m -XX:+UseG1GC -XX:+ExitOnOutOfMemoryError -jar /opt/joysong-demo/current/joysong-server.jar ;'* ]] || return 1
+  require_root_protected_file "$SYSTEMD_UNIT" "systemd unit"
+  digest="$(file_sha "$SYSTEMD_UNIT")" || return 1
+  expected="$(read_assignment "$HOST_CONTRACT" SYSTEMD_UNIT_SHA256 || true)"
+  [[ "$expected" =~ $SHA64_RE && "$digest" == "$expected" ]] || return 1
+  printf '%s' "$digest"
+}
+
+mainpid_jar() {
+  local pid="$1" jar
+  if [[ -n "$PATH_PREFIX" ]]; then
+    jar="$(cat "$(host_path /run/joysong-uat-test-main-jar)" 2>/dev/null || true)"
+  else
+    [[ -r "/proc/$pid/cmdline" ]] || return 1
+    jar="$(tr '\0' '\n' <"/proc/$pid/cmdline" | grep -E '/joysong-server\.jar$' | tail -n 1 || true)"
+  fi
+  [[ -n "$jar" ]] || return 1
+  readlink -f "$jar"
+}
+
+listener_owned_by_pid() {
+  local pid="$1" output
+  output="$(run_with_timeout "$COMMAND_TIMEOUT_SECONDS" ss -H -ltnp "sport = :$PORT")" || return 1
+  [[ "$(wc -l <<<"$output" | tr -d ' ')" == 1 ]] || return 1
+  [[ "$output" == *"127.0.0.1:$PORT"* && "$output" == *"pid=$pid,"* ]]
+}
+
+CURRENT_BACKEND=''
+CURRENT_ADMIN=''
+CURRENT_JAR=''
+CURRENT_MIGRATION_SHA=''
+CURRENT_FLYWAY_SHA=''
+CURRENT_CONFIG_SHA=''
+CURRENT_NGINX_SHA=''
+CURRENT_SYSTEMD_SHA=''
+CURRENT_PID=''
+CURRENT_BACKEND_TREE_SHA=''
+CURRENT_ADMIN_TREE_SHA=''
+DEPLOY_MODE=''
+
+path_present() { [[ -e "$1" || -L "$1" ]]; }
+
+classify_deployment_mode() {
+  local backend_current=false admin_current=false backend_previous=false admin_previous=false
+  path_present "$BACKEND_CURRENT" && backend_current=true
+  path_present "$ADMIN_CURRENT" && admin_current=true
+  path_present "$BACKEND_PREVIOUS" && backend_previous=true
+  path_present "$ADMIN_PREVIOUS" && admin_previous=true
+  [[ "$backend_current" == "$admin_current" ]] ||
+    fail "Backend/Admin current links are incomplete"
+  [[ "$backend_previous" == "$admin_previous" ]] ||
+    fail "Backend/Admin previous links are incomplete"
+  if [[ "$backend_current" == true ]]; then
+    DEPLOY_MODE=existing
+  else
+    [[ "$backend_previous" == false ]] ||
+      fail "a fresh deployment must not have previous release links"
+    [[ ! -e "$PREVIOUS_IDENTITY" && ! -L "$PREVIOUS_IDENTITY" ]] ||
+      fail "a fresh deployment must not have previous release identity"
+    DEPLOY_MODE=fresh
+  fi
+}
+
+load_fresh_state() {
+  local active enabled
+  [[ ! -e "$BACKEND_CURRENT" && ! -L "$BACKEND_CURRENT" &&
+     ! -e "$ADMIN_CURRENT" && ! -L "$ADMIN_CURRENT" &&
+     ! -e "$BACKEND_PREVIOUS" && ! -L "$BACKEND_PREVIOUS" &&
+     ! -e "$ADMIN_PREVIOUS" && ! -L "$ADMIN_PREVIOUS" ]] ||
+    fail "fresh deployment requires current and previous links to be absent"
+  active="$(run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl is-active "$SERVICE" 2>/dev/null || true)"
+  enabled="$(run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl is-enabled "$SERVICE" 2>/dev/null || true)"
+  [[ "$active" == inactive ]] || fail "fresh deployment requires the service to be inactive"
+  [[ "$enabled" == disabled ]] || fail "fresh deployment requires the service to be disabled"
+  service_stopped_and_port_free || fail "fresh deployment requires 127.0.0.1:8080 to be unused"
+  systemd_contract_sha >/dev/null || fail "systemd service contract validation failed"
+  [[ "$(systemctl_property User)" == "$SERVICE_USER" && "$(systemctl_property Group)" == "$SERVICE_GROUP" ]] ||
+    fail "service user/group contract changed"
+  CURRENT_FLYWAY_SHA="$(database_state_snapshot)" || fail "database state could not be validated"
+  [[ "$CURRENT_FLYWAY_SHA" == "$EMPTY_DATABASE_SHA256" ]] ||
+    fail "fresh deployment requires a database with no tables"
+  CURRENT_CONFIG_SHA="$(file_sha "$CONFIG_FILE")"
+  CURRENT_NGINX_SHA="$(nginx_config_sha)" || fail "Nginx site contract validation failed"
+  CURRENT_SYSTEMD_SHA="$(systemd_contract_sha)" || fail "systemd service contract validation failed"
+}
+
+verify_fresh_state_unchanged() {
+  local active enabled
+  [[ ! -e "$BACKEND_CURRENT" && ! -L "$BACKEND_CURRENT" &&
+     ! -e "$ADMIN_CURRENT" && ! -L "$ADMIN_CURRENT" &&
+     ! -e "$BACKEND_PREVIOUS" && ! -L "$BACKEND_PREVIOUS" &&
+     ! -e "$ADMIN_PREVIOUS" && ! -L "$ADMIN_PREVIOUS" ]] ||
+    fail "fresh release links changed before the initial switch"
+  active="$(run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl is-active "$SERVICE" 2>/dev/null || true)"
+  enabled="$(run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl is-enabled "$SERVICE" 2>/dev/null || true)"
+  [[ "$active" == inactive && "$enabled" == disabled ]] ||
+    fail "fresh service state changed before the initial switch"
+  service_stopped_and_port_free || fail "fresh service or 8080 listener changed before the initial switch"
+  [[ "$(database_state_snapshot)" == "$CURRENT_FLYWAY_SHA" ]] ||
+    fail "fresh database changed before the initial switch"
+  [[ "$(file_sha "$CONFIG_FILE")" == "$CURRENT_CONFIG_SHA" &&
+     "$(nginx_config_sha)" == "$CURRENT_NGINX_SHA" &&
+     "$(systemd_contract_sha)" == "$CURRENT_SYSTEMD_SHA" ]] ||
+    fail "runtime, Nginx or systemd configuration changed before the initial switch"
+}
+
+load_deployment_state() {
+  classify_deployment_mode
+  if [[ "$DEPLOY_MODE" == fresh ]]; then
+    load_fresh_state
+  else
+    load_current_state
+  fi
+}
+
+verify_service_contract() {
+  local expected_backend="$1" expected_jar actual_jar active enabled
+  active="$(run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl is-active "$SERVICE")" ||
+    fail "service is not active"
+  [[ "$active" == active ]] || fail "service is not active"
+  enabled="$(run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl is-enabled "$SERVICE")" ||
+    fail "service is not enabled"
+  [[ "$enabled" == enabled ]] || fail "service is not enabled"
+  systemd_contract_sha >/dev/null || fail "systemd service path or unit contract changed"
+  [[ "$(systemctl_property User)" == "$SERVICE_USER" && "$(systemctl_property Group)" == "$SERVICE_GROUP" ]] ||
+    fail "service user/group contract changed"
+  CURRENT_PID="$(systemctl_property MainPID)"
+  [[ "$CURRENT_PID" =~ ^[1-9][0-9]*$ && "$CURRENT_PID" != 1 ]] || fail "service MainPID is invalid"
+  expected_jar="$(readlink -f "$expected_backend/joysong-server.jar" 2>/dev/null || true)"
+  actual_jar="$(mainpid_jar "$CURRENT_PID" || true)"
+  [[ -n "$expected_jar" && "$actual_jar" == "$expected_jar" ]] ||
+    fail "MainPID does not run the current release JAR"
+  listener_owned_by_pid "$CURRENT_PID" || fail "MainPID does not exclusively own 127.0.0.1:8080"
+}
+
+verify_admin_locally() {
+  local expected_admin="$1" expected_sha response root_sha deep_sha
+  expected_sha="$(file_sha "$expected_admin/index.html")" || return 1
+  response="$(mktemp "$STATE_ROOT/.admin-response.XXXXXX")" || return 1
+    if ! run_with_timeout 10 curl -q --noproxy '*' --fail --silent --show-error --max-time 5 \
+      -H "Host: $ADMIN_HOST" --output "$response" http://127.0.0.1/; then
+    rm -f "$response"; return 1
+  fi
+  root_sha="$(file_sha "$response")"
+  if ! run_with_timeout 10 curl -q --noproxy '*' --fail --silent --show-error --max-time 5 \
+      -H "Host: $ADMIN_HOST" --output "$response" http://127.0.0.1/orders; then
+    rm -f "$response"; return 1
+  fi
+  deep_sha="$(file_sha "$response")"
+  rm -f "$response"
+  [[ "$root_sha" == "$expected_sha" && "$deep_sha" == "$expected_sha" ]]
+}
+
+load_current_state() {
+  CURRENT_BACKEND="$(safe_link_target "$BACKEND_CURRENT" "$BACKEND_RELEASES")"
+  CURRENT_ADMIN="$(safe_link_target "$ADMIN_CURRENT" "$ADMIN_RELEASES")"
+  CURRENT_JAR="$CURRENT_BACKEND/joysong-server.jar"
+  require_regular_file "$CURRENT_JAR" "current server JAR"
+  require_regular_file "$CURRENT_ADMIN/index.html" "current Admin index"
+  CURRENT_BACKEND_TREE_SHA="$(immutable_tree_sha "$CURRENT_BACKEND")" ||
+    fail "current Backend release tree is not root-owned and immutable"
+  CURRENT_ADMIN_TREE_SHA="$(immutable_tree_sha "$CURRENT_ADMIN")" ||
+    fail "current Admin release tree is not root-owned and immutable"
+  CURRENT_MIGRATION_SHA="$("$PYTHON_BIN" -I "$VERIFY_TOOL" migration-sha "$CURRENT_JAR")" ||
+    fail "current server migration digest is invalid"
+  [[ "$CURRENT_MIGRATION_SHA" =~ $SHA64_RE ]] || fail "current migration digest is invalid"
+  CURRENT_FLYWAY_SHA="$(flyway_snapshot)" || fail "Flyway history validation failed"
+  CURRENT_CONFIG_SHA="$(file_sha "$CONFIG_FILE")"
+  CURRENT_NGINX_SHA="$(nginx_config_sha)"
+  CURRENT_SYSTEMD_SHA="$(systemd_contract_sha)" || fail "systemd service contract validation failed"
+  verify_service_contract "$CURRENT_BACKEND"
+  verify_admin_locally "$CURRENT_ADMIN" || fail "current Admin root/deep-route contract failed"
+}
+
+validate_incoming_bundle() {
+  local tag="$1" commit="$2" run_id="$3" bundle_sha="$4" incoming bundle
+  incoming="$INCOMING_ROOT/$run_id"
+  bundle="$incoming/joysong-uat-${tag}.tar.gz"
+  require_real_directory "$incoming" "run-specific incoming directory"
+  require_regular_file "$bundle" "incoming deployment bundle"
+  if [[ -z "$PATH_PREFIX" ]]; then
+    [[ "$(stat -c '%U:%G:%a' "$incoming")" == "$RUNNER_USER:$RUNNER_USER:700" ]] ||
+      fail "run-specific incoming directory has unsafe ownership or mode"
+    [[ "$(stat -c '%U:%G' "$bundle")" == "$RUNNER_USER:$RUNNER_USER" ]] ||
+      fail "incoming deployment bundle has an unexpected owner"
+    mode_not_writable_by_group_or_other "$(stat -c '%a' "$bundle")" ||
+      fail "incoming deployment bundle is writable by group or other"
+  fi
+  printf '%s' "$bundle"
+}
+
+reject_reused_tag() {
+  local tag="$1"
+  [[ ! -e "$BACKEND_RELEASES/$tag" && ! -L "$BACKEND_RELEASES/$tag" &&
+     ! -e "$ADMIN_RELEASES/$tag" && ! -L "$ADMIN_RELEASES/$tag" &&
+     ! -e "$STATE_ROOT/releases/$tag.state" && ! -L "$STATE_ROOT/releases/$tag.state" ]] ||
+    fail "release tag is immutable and has already been used"
+}
+
+STAGING_ROOT=''
+CANDIDATE_ROOT=''
+CANDIDATE_MIGRATION_SHA=''
+
+verify_candidate() {
+  local tag="$1" commit="$2" run_id="$3" bundle_sha="$4" bundle frozen_bundle output
+  bundle="$(validate_incoming_bundle "$tag" "$commit" "$run_id" "$bundle_sha")"
+  STAGING_ROOT="$(mktemp -d "$STATE_ROOT/.verify.XXXXXX")"
+  CANDIDATE_ROOT="$STAGING_ROOT/payload"
+  install -d -m 0700 "$CANDIDATE_ROOT"
+  frozen_bundle="$STAGING_ROOT/candidate.tar.gz"
+  "$PYTHON_BIN" -I "$VERIFY_TOOL" freeze "$bundle" "$frozen_bundle" "$bundle_sha" >/dev/null ||
+    fail "candidate bundle could not be frozen safely"
+  output="$("$PYTHON_BIN" -I "$VERIFY_TOOL" "$frozen_bundle" "$CANDIDATE_ROOT" "$tag" "$commit" "$run_id" "$bundle_sha")" ||
+    fail "candidate bundle verification failed"
+  CANDIDATE_MIGRATION_SHA="$(sed -n 's/^DATABASE_MIGRATIONS_SHA256=//p' <<<"$output")"
+  [[ "$CANDIDATE_MIGRATION_SHA" =~ $SHA64_RE ]] || fail "candidate migration digest is missing"
+  if [[ "$DEPLOY_MODE" == existing ]]; then
+    [[ "$CANDIDATE_MIGRATION_SHA" == "$CURRENT_MIGRATION_SHA" ]] ||
+      fail "candidate migrations differ; an isolated restore/migration/rollback drill is required"
+  fi
+}
+
+validate_persistent_tree() {
+  local root="$1"
+  if find "$root" -xdev -type l -print -quit | grep -q .; then
+    fail "persistent data contains a symbolic link: $root"
+  fi
+  if find "$root" -xdev ! -type d ! -type f -print -quit | grep -q .; then
+    fail "persistent data contains a special file: $root"
+  fi
+  if find "$root" -xdev -type f -links +1 -print -quit | grep -q .; then
+    fail "persistent data contains a multiply-linked file: $root"
+  fi
+}
+
+database_metrics() {
+  mysql_query "SELECT COALESCE(SUM(data_length+index_length),0) FROM information_schema.tables WHERE table_schema=DATABASE(); SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND engine <> 'InnoDB'; SELECT COUNT(*) FROM information_schema.events WHERE event_schema=DATABASE();"
+}
+
+verify_capacity_and_backup_readiness() {
+  local database_bytes non_innodb events data_bytes candidate_bytes backend_bytes admin_bytes
+  local backup_available backend_available admin_available backup_required backend_required admin_required
+  local -a values
+  mapfile -t values < <(database_metrics)
+  ((${#values[@]} == 3)) || fail "database backup metrics are incomplete"
+  database_bytes="${values[0]}"; non_innodb="${values[1]}"; events="${values[2]}"
+  [[ "$database_bytes" =~ ^[0-9]+$ && "$non_innodb" == 0 && "$events" == 0 ]] ||
+    fail "online backup requires a measurable all-InnoDB database with no scheduled events"
+  for directory in "$UPLOADS" "$PRIVATE_DATA" "$STAGING_DATA"; do validate_persistent_tree "$directory"; done
+  data_bytes="$(du -sb "$UPLOADS" "$PRIVATE_DATA" "$STAGING_DATA" | awk '{total += $1} END {print total+0}')"
+  candidate_bytes="$(du -sb "$STAGING_ROOT" | awk '{print $1}')"
+  backend_bytes="$(du -sb "$CANDIDATE_ROOT/joysong-server.jar" "$CANDIDATE_ROOT/manifest.json" "$CANDIDATE_ROOT/release.json" | awk '{total += $1} END {print total+0}')"
+  admin_bytes="$(du -sb "$CANDIDATE_ROOT/admin" | awk '{print $1}')"
+  backup_available="$(df -PB1 "$BACKUP_ROOT" | awk 'NR==2 {print $4}')"
+  backend_available="$(df -PB1 "$BACKEND_RELEASES" | awk 'NR==2 {print $4}')"
+  admin_available="$(df -PB1 "$ADMIN_RELEASES" | awk 'NR==2 {print $4}')"
+  [[ "$data_bytes" =~ ^[0-9]+$ && "$candidate_bytes" =~ ^[0-9]+$ &&
+     "$backend_bytes" =~ ^[0-9]+$ && "$admin_bytes" =~ ^[0-9]+$ &&
+     "$backup_available" =~ ^[0-9]+$ && "$backend_available" =~ ^[0-9]+$ &&
+     "$admin_available" =~ ^[0-9]+$ ]] ||
+    fail "filesystem capacity could not be measured"
+  backup_required=$((CAPACITY_RESERVE_BYTES + candidate_bytes * 2 + data_bytes * 2 + database_bytes * 2))
+  backend_required=$((CAPACITY_RESERVE_BYTES + backend_bytes))
+  admin_required=$((CAPACITY_RESERVE_BYTES + admin_bytes))
+  ((backup_available >= backup_required)) || fail "insufficient free space for verified backups and staging"
+  ((backend_available >= backend_required)) || fail "insufficient free space for immutable Backend install"
+  ((admin_available >= admin_required)) || fail "insufficient free space for immutable Admin install"
+}
+
+install_candidate() {
+  local tag="$1" backend_stage admin_stage
+  backend_stage="$BACKEND_RELEASES/.${tag}.stage.$$"
+  admin_stage="$ADMIN_RELEASES/.${tag}.stage.$$"
+  [[ ! -e "$backend_stage" && ! -e "$admin_stage" ]] || fail "candidate staging path already exists"
+  install -d -m 0755 "$backend_stage" "$admin_stage"
+  install -m 0444 "$CANDIDATE_ROOT/joysong-server.jar" "$backend_stage/joysong-server.jar"
+  install -m 0444 "$CANDIDATE_ROOT/manifest.json" "$backend_stage/manifest.json"
+  install -m 0444 "$CANDIDATE_ROOT/release.json" "$backend_stage/release.json"
+  cp -R --no-preserve=ownership,mode,timestamps,context,xattr "$CANDIDATE_ROOT/admin/." "$admin_stage/"
+  find "$admin_stage" -type d -exec chmod 0755 {} +
+  find "$admin_stage" -type f -exec chmod 0644 {} +
+  if [[ -z "$PATH_PREFIX" ]]; then
+    chown -R root:root "$backend_stage" "$admin_stage"
+  fi
+  mv -- "$backend_stage" "$BACKEND_RELEASES/$tag"
+  mv -- "$admin_stage" "$ADMIN_RELEASES/$tag"
+  chmod 0555 "$BACKEND_RELEASES/$tag" "$ADMIN_RELEASES/$tag"
+}
+
+BACKUP_PATH=''
+
+create_verified_backup() {
+  local tag="$1" commit="$2" timestamp identity config_sha_after database_after data_before data_after
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  BACKUP_PATH="$BACKUP_ROOT/${timestamp}-${tag}"
+  [[ ! -e "$BACKUP_PATH" && ! -L "$BACKUP_PATH" ]] || fail "backup path already exists"
+  install -d -m 0700 "$BACKUP_PATH"
+  install -m 0600 "$CONFIG_FILE" "$BACKUP_PATH/joysong.env"
+  data_before="$(for directory in "$UPLOADS" "$PRIVATE_DATA" "$STAGING_DATA"; do tree_sha "$directory"; done | sha256sum | awk '{print $1}')"
+  tar --create --gzip --file "$BACKUP_PATH/persistent-data.tar.gz" --directory "$DATA_ROOT" \
+    --numeric-owner --acls --xattrs --selinux uploads private upload-staging
+  tar --compare --gzip --file "$BACKUP_PATH/persistent-data.tar.gz" --directory "$DATA_ROOT" \
+    --numeric-owner --acls --xattrs --selinux >/dev/null ||
+    fail "persistent data backup does not reproduce the live tree metadata and content"
+  data_after="$(for directory in "$UPLOADS" "$PRIVATE_DATA" "$STAGING_DATA"; do tree_sha "$directory"; done | sha256sum | awk '{print $1}')"
+  [[ "$data_before" == "$data_after" ]] || fail "persistent data changed while it was being backed up"
+  if ! run_with_timeout 150 mysqldump --defaults-file="$MYSQL_CONFIG" --protocol=TCP \
+      --host="$DATABASE_HOST" --port="$DATABASE_PORT" --single-transaction --quick \
+      --routines --triggers --skip-events --hex-blob --default-character-set=utf8mb4 \
+      --set-gtid-purged=OFF --no-tablespaces "$DATABASE_NAME" |
+      gzip -n >"$BACKUP_PATH/database.sql.gz"; then
+    fail "database backup failed; service remains online"
+  fi
+  gzip -t "$BACKUP_PATH/database.sql.gz" || fail "database backup gzip verification failed"
+  if gzip -cd "$BACKUP_PATH/database.sql.gz" | awk '
+      BEGIN { found = 0 }
+      /^[[:space:]]*([Cc][Rr][Ee][Aa][Tt][Ee][[:space:]]+[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]|[Uu][Ss][Ee][[:space:]]+)/ { found = 1 }
+      END { exit(found ? 0 : 1) }
+    '; then
+    fail "database backup contains a forbidden database selector"
+  fi
+  identity="$(mktemp "$STATE_ROOT/.identity.XXXXXX")"
+  {
+    printf 'TAG=%s\nCOMMIT=%s\nMODE=%s\nDATABASE_HOST=%s\nDATABASE_NAME=%s\n' \
+      "$tag" "$commit" "$DEPLOY_MODE" "$DATABASE_HOST" "$DATABASE_NAME"
+    printf 'FLYWAY_HISTORY_SHA256=%s\n' "$CURRENT_FLYWAY_SHA"
+    if [[ "$DEPLOY_MODE" == existing ]]; then
+      printf 'DATABASE_MIGRATIONS_SHA256=%s\n' "$CURRENT_MIGRATION_SHA"
+      printf 'BACKEND_TARGET=%s\nBACKEND_JAR_SHA256=%s\nBACKEND_TREE_SHA256=%s\n' \
+        "$CURRENT_BACKEND" "$(file_sha "$CURRENT_JAR")" "$CURRENT_BACKEND_TREE_SHA"
+      printf 'ADMIN_TARGET=%s\nADMIN_TREE_SHA256=%s\n' "$CURRENT_ADMIN" "$CURRENT_ADMIN_TREE_SHA"
+    else
+      printf 'DATABASE_MIGRATIONS_SHA256=NONE\nCANDIDATE_MIGRATIONS_SHA256=%s\n' "$CANDIDATE_MIGRATION_SHA"
+    fi
+    printf 'CONFIG_SHA256=%s\nNGINX_CONFIG_SHA256=%s\nSYSTEMD_UNIT_SHA256=%s\n' "$CURRENT_CONFIG_SHA" "$CURRENT_NGINX_SHA" "$CURRENT_SYSTEMD_SHA"
+    printf 'PERSISTENT_DATA_SHA256=%s\n' "$data_before"
+    printf 'PUBLIC_BUCKET=%s\nPRIVATE_BUCKET=%s\nCREATED_AT=%s\n' "$PUBLIC_BUCKET" "$PRIVATE_BUCKET" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >"$identity"
+  install -m 0600 "$identity" "$BACKUP_PATH/identity"
+  rm -f "$identity"
+  (
+    cd "$BACKUP_PATH"
+    sha256sum database.sql.gz identity joysong.env persistent-data.tar.gz >SHA256SUMS
+    sha256sum --check --status SHA256SUMS
+    chmod 0600 ./*
+  )
+  config_sha_after="$(file_sha "$CONFIG_FILE")"
+  database_after="$(database_state_snapshot)" || fail "database state could not be revalidated after backup"
+  [[ "$config_sha_after" == "$CURRENT_CONFIG_SHA" && "$database_after" == "$CURRENT_FLYWAY_SHA" ]] ||
+    fail "runtime configuration or database state changed during backup"
+  if [[ "$DEPLOY_MODE" == existing ]]; then
+    [[ "$(safe_link_target "$BACKEND_CURRENT" "$BACKEND_RELEASES")" == "$CURRENT_BACKEND" &&
+       "$(safe_link_target "$ADMIN_CURRENT" "$ADMIN_RELEASES")" == "$CURRENT_ADMIN" ]] ||
+      fail "current release pair changed during backup"
+    [[ "$(immutable_tree_sha "$CURRENT_BACKEND")" == "$CURRENT_BACKEND_TREE_SHA" &&
+       "$(immutable_tree_sha "$CURRENT_ADMIN")" == "$CURRENT_ADMIN_TREE_SHA" ]] ||
+      fail "current release pair content or permissions changed during backup"
+  else
+    [[ ! -e "$BACKEND_CURRENT" && ! -L "$BACKEND_CURRENT" &&
+       ! -e "$ADMIN_CURRENT" && ! -L "$ADMIN_CURRENT" &&
+       ! -e "$BACKEND_PREVIOUS" && ! -L "$BACKEND_PREVIOUS" &&
+       ! -e "$ADMIN_PREVIOUS" && ! -L "$ADMIN_PREVIOUS" ]] ||
+      fail "fresh release links appeared during backup"
+    service_stopped_and_port_free || fail "fresh service or 8080 listener changed during backup"
+  fi
+  printf 'BACKUP_COMPLETE=true\nTAG=%s\nCOMMIT=%s\n' "$tag" "$commit" >"$BACKUP_PATH/BACKUP_COMPLETE"
+  chmod 0600 "$BACKUP_PATH/BACKUP_COMPLETE"
+  printf 'BACKUP_PATH=%s\n' "$BACKUP_PATH"
+}
+
+write_state() {
+  local tag="$1" status="$2" downtime="$3" temporary
+  install -d -m 0700 "$STATE_ROOT/releases"
+  temporary="$(mktemp "$STATE_ROOT/.release-state.XXXXXX")"
+  {
+    printf 'TAG=%s\nCOMMIT=%s\nRUN_ID=%s\nSTATUS=%s\n' "$tag" "$DEPLOY_COMMIT" "$DEPLOY_RUN_ID" "$status"
+    printf 'BUNDLE_SHA256=%s\nDATABASE_MIGRATIONS_SHA256=%s\n' "$DEPLOY_BUNDLE_SHA" "$CANDIDATE_MIGRATION_SHA"
+    printf 'BACKUP_PATH=%s\nDOWNTIME_SECONDS=%s\nUPDATED_AT=%s\n' "$BACKUP_PATH" "$downtime" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >"$temporary"
+  atomic_root_file "$STATE_ROOT/releases/$tag.state" "$temporary"
+  rm -f "$temporary"
+}
+
+write_transaction_marker() {
+  local tag="$1" temporary
+  temporary="$(mktemp "$STATE_ROOT/.transaction.XXXXXX")"
+  {
+    printf 'ACTION=deploy\nMODE=%s\nTAG=%s\nCOMMIT=%s\nRUN_ID=%s\n' \
+      "$DEPLOY_MODE" "$tag" "$DEPLOY_COMMIT" "$DEPLOY_RUN_ID"
+    printf 'FLYWAY_HISTORY_SHA256=%s\n' "$CURRENT_FLYWAY_SHA"
+    if [[ "$DEPLOY_MODE" == existing ]]; then
+      printf 'OLD_BACKEND=%s\nOLD_ADMIN=%s\n' "$CURRENT_BACKEND" "$CURRENT_ADMIN"
+      printf 'OLD_BACKEND_TREE_SHA256=%s\nOLD_ADMIN_TREE_SHA256=%s\n' \
+        "$CURRENT_BACKEND_TREE_SHA" "$CURRENT_ADMIN_TREE_SHA"
+    fi
+    printf 'BACKUP_PATH=%s\nSTARTED_AT=%s\n' "$BACKUP_PATH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >"$temporary"
+  atomic_root_file "$TRANSACTION_MARKER" "$temporary"
+  rm -f "$temporary"
+}
+
+wait_for_backend() {
+  local expected_backend="$1" old_pid="$2" deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS)) pid actual
+  if ((ACTIVE_DEADLINE > 0 && ACTIVE_DEADLINE < deadline)); then
+    deadline="$ACTIVE_DEADLINE"
+  fi
+  while ((SECONDS < deadline)); do
+    if [[ "$(run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl is-active "$SERVICE" 2>/dev/null || true)" == active ]]; then
+      pid="$(systemctl_property MainPID 2>/dev/null || true)"
+      if [[ "$pid" =~ ^[1-9][0-9]*$ && "$pid" != "$old_pid" ]]; then
+        actual="$(mainpid_jar "$pid" 2>/dev/null || true)"
+        if [[ "$actual" == "$(readlink -f "$expected_backend/joysong-server.jar")" ]] && listener_owned_by_pid "$pid"; then
+          if backend_health_up; then
+            CURRENT_PID="$pid"
+            return 0
+          fi
+        fi
+      fi
+    fi
+    if ((ACTIVE_DEADLINE > 0 && SECONDS + 2 >= ACTIVE_DEADLINE)); then
+      break
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+backend_health_up() {
+  local body
+  body="$(run_with_timeout 10 curl -q --noproxy '*' --fail --silent --show-error \
+    --max-time 5 --max-filesize 1048576 http://127.0.0.1:8080/actuator/health 2>/dev/null)" || return 1
+  "$PYTHON_BIN" -I -c '
+from __future__ import print_function
+import json, sys
+try:
+    value = json.loads(sys.stdin.read())
+except (TypeError, ValueError):
+    raise SystemExit(1)
+raise SystemExit(0 if isinstance(value, dict) and value.get("status") == "UP" else 1)
+' <<<"$body"
+}
+
+service_stopped_and_port_free() {
+  local expected_pid="${1:-}" active listener
+  active="$(run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl is-active "$SERVICE" 2>/dev/null || true)"
+  [[ "$active" == inactive || "$active" == failed ]] || return 1
+  if [[ -n "$expected_pid" && -z "$PATH_PREFIX" && -e "/proc/$expected_pid" ]]; then
+    return 1
+  fi
+  listener="$(run_with_timeout "$COMMAND_TIMEOUT_SECONDS" ss -H -ltnp "sport = :$PORT" 2>/dev/null)" || return 1
+  [[ -z "$listener" ]]
+}
+
+TRANSACTION_ACTIVE=false
+TRANSACTION_COMMITTED=false
+PREVIOUS_BINDING_STARTED=false
+DEPLOY_TAG=''
+DEPLOY_COMMIT=''
+DEPLOY_RUN_ID=''
+DEPLOY_BUNDLE_SHA=''
+OUTAGE_STARTED=0
+OUTAGE_DEADLINE=0
+CANDIDATE_DEADLINE=0
+ACTIVE_DEADLINE=0
+
+previous_pair_unchanged() {
+  local backend_sha admin_sha
+  backend_sha="$(immutable_tree_sha "$CURRENT_BACKEND")" || return 1
+  admin_sha="$(immutable_tree_sha "$CURRENT_ADMIN")" || return 1
+  [[ "$backend_sha" == "$CURRENT_BACKEND_TREE_SHA" &&
+     "$admin_sha" == "$CURRENT_ADMIN_TREE_SHA" ]]
+}
+
+clear_fresh_candidate_links() {
+  local link expected actual
+  for link in "$BACKEND_CURRENT" "$ADMIN_CURRENT"; do
+    if [[ "$link" == "$BACKEND_CURRENT" ]]; then
+      expected="$BACKEND_RELEASES/$DEPLOY_TAG"
+    else
+      expected="$ADMIN_RELEASES/$DEPLOY_TAG"
+    fi
+    if path_present "$link"; then
+      [[ -L "$link" ]] || return 1
+      actual="$(readlink -f "$link" 2>/dev/null || true)"
+      [[ -n "$actual" && "$actual" == "$(readlink -f "$expected" 2>/dev/null || true)" ]] || return 1
+    fi
+  done
+  rm -f -- "$BACKEND_CURRENT" "$ADMIN_CURRENT"
+}
+
+recover_on_failure() {
+  local code=$? history_now='' recovered=false stopped=false elapsed=0
+  trap - EXIT INT TERM
+  set +e
+  if [[ -n "$STAGING_ROOT" && -d "$STAGING_ROOT" ]]; then rm -rf --one-file-system "$STAGING_ROOT"; fi
+  if [[ "$code" -ne 0 && "$TRANSACTION_ACTIVE" == true && "$TRANSACTION_COMMITTED" == false ]]; then
+    ((OUTAGE_DEADLINE > 0)) || OUTAGE_DEADLINE=$((OUTAGE_STARTED + OUTAGE_LIMIT_SECONDS))
+    ACTIVE_DEADLINE="$OUTAGE_DEADLINE"
+    run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl stop "$SERVICE" >/dev/null 2>&1 || true
+    if service_stopped_and_port_free "$CURRENT_PID"; then
+      stopped=true
+    else
+      run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl disable "$SERVICE" >/dev/null 2>&1 || true
+      run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl stop "$SERVICE" >/dev/null 2>&1 || true
+      service_stopped_and_port_free "$CURRENT_PID" && stopped=true
+    fi
+    if [[ "$stopped" != true ]]; then
+      printf 'CRITICAL: failed candidate could not be confirmed stopped; transaction marker remains and the old JAR was not reconnected.\n' >&2
+      exit "$code"
+    fi
+    if [[ "$DEPLOY_MODE" == fresh ]]; then
+      history_now="$(database_state_snapshot 2>/dev/null)"
+      run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl disable "$SERVICE" >/dev/null 2>&1 || true
+      if [[ -n "$history_now" && "$history_now" == "$CURRENT_FLYWAY_SHA" ]] &&
+          clear_fresh_candidate_links && service_stopped_and_port_free "$CURRENT_PID"; then
+        elapsed=$((SECONDS - OUTAGE_STARTED))
+        if write_state "$DEPLOY_TAG" failed-retryable "$elapsed" && rm -f "$TRANSACTION_MARKER"; then
+          recovered=true
+          printf 'Candidate failed before changing the empty database; fresh links were removed and failure evidence was retained.\n' >&2
+        else
+          printf 'CRITICAL: fresh state was restored but evidence or marker cleanup failed; transaction marker remains.\n' >&2
+        fi
+      fi
+      if [[ "$recovered" != true ]]; then
+        run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl disable "$SERVICE" >/dev/null 2>&1 || true
+        run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl stop "$SERVICE" >/dev/null 2>&1 || true
+        printf 'CRITICAL: fresh deployment changed database state or could not be restored; service is disabled and the transaction marker remains for operator review.\n' >&2
+      fi
+      ACTIVE_DEADLINE=0
+      exit "$code"
+    fi
+    history_now="$(flyway_snapshot 2>/dev/null)"
+    if [[ -n "$history_now" && "$history_now" == "$CURRENT_FLYWAY_SHA" ]] &&
+        previous_pair_unchanged; then
+      atomic_link "$CURRENT_BACKEND" "$BACKEND_CURRENT" &&
+        atomic_link "$CURRENT_ADMIN" "$ADMIN_CURRENT" &&
+        run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl start "$SERVICE" &&
+        wait_for_backend "$CURRENT_BACKEND" "$CURRENT_PID" &&
+        verify_admin_locally "$CURRENT_ADMIN" &&
+        run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl enable "$SERVICE" &&
+        ((SECONDS <= OUTAGE_DEADLINE)) && recovered=true
+    fi
+    if [[ "$recovered" == true && "$PREVIOUS_BINDING_STARTED" == false ]]; then
+      elapsed=$((SECONDS - OUTAGE_STARTED))
+      if write_state "$DEPLOY_TAG" rolled-back "$elapsed"; then
+        rm -f "$TRANSACTION_MARKER" ||
+          printf 'CRITICAL: rollback succeeded but transaction marker cleanup failed.\n' >&2
+      else
+        printf 'CRITICAL: rollback succeeded but state recording failed; transaction marker remains.\n' >&2
+      fi
+      printf 'Candidate failed; the previous Backend/Admin pair was restored because Flyway history was unchanged.\n' >&2
+    elif [[ "$recovered" == true ]]; then
+      printf 'CRITICAL: the prior current pair was restored, but previous-pair binding was interrupted; transaction marker remains.\n' >&2
+    else
+      run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl disable "$SERVICE" >/dev/null 2>&1 || true
+      run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl stop "$SERVICE" >/dev/null 2>&1 || true
+      if service_stopped_and_port_free "$CURRENT_PID"; then
+        printf 'CRITICAL: recovery was withheld or failed; service is confirmed stopped and the transaction marker remains for operator review.\n' >&2
+      else
+        printf 'CRITICAL: recovery failed and stopped state could not be confirmed; transaction marker remains for operator review.\n' >&2
+      fi
+    fi
+  fi
+  ACTIVE_DEADLINE=0
+  exit "$code"
+}
+trap recover_on_failure EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+switch_release_pair() {
+  local tag="$1" old_pid="$CURRENT_PID" flyway_after config_after nginx_after systemd_after elapsed previous_temp
+  write_transaction_marker "$tag"
+  OUTAGE_STARTED="$SECONDS"
+  OUTAGE_DEADLINE=$((OUTAGE_STARTED + OUTAGE_LIMIT_SECONDS))
+  CANDIDATE_DEADLINE=$((OUTAGE_DEADLINE - RECOVERY_RESERVE_SECONDS))
+  ACTIVE_DEADLINE="$CANDIDATE_DEADLINE"
+  TRANSACTION_ACTIVE=true
+  run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl disable "$SERVICE"
+  run_with_timeout 50 systemctl stop "$SERVICE"
+  service_stopped_and_port_free "$old_pid" || fail "old MainPID, service or 8080 listener did not stop"
+  atomic_link "$BACKEND_RELEASES/$tag" "$BACKEND_CURRENT"
+  run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl start "$SERVICE"
+  wait_for_backend "$BACKEND_RELEASES/$tag" "$old_pid" || fail "candidate backend did not become healthy within 90 seconds"
+  flyway_after="$(flyway_snapshot)" || fail "Flyway history could not be validated after candidate startup"
+  [[ "$flyway_after" == "$CURRENT_FLYWAY_SHA" ]] || fail "Flyway history changed unexpectedly after candidate startup"
+  atomic_link "$ADMIN_RELEASES/$tag" "$ADMIN_CURRENT"
+  verify_admin_locally "$ADMIN_RELEASES/$tag" || fail "candidate Admin failed local Host root/deep-route checks"
+  run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl enable "$SERVICE"
+  ((SECONDS + 3 < CANDIDATE_DEADLINE)) || fail "candidate exhausted the rollback reserve before stability wait"
+  sleep 3
+  verify_service_contract "$BACKEND_RELEASES/$tag"
+  backend_health_up || fail "candidate backend failed the final health check"
+  verify_admin_locally "$ADMIN_RELEASES/$tag" || fail "candidate Admin failed final stability check"
+  [[ "$(flyway_snapshot)" == "$CURRENT_FLYWAY_SHA" ]] || fail "Flyway history changed during final stability check"
+  config_after="$(file_sha "$CONFIG_FILE")"; nginx_after="$(nginx_config_sha)"
+  systemd_after="$(systemd_contract_sha)" || fail "systemd service contract changed during deployment"
+  [[ "$config_after" == "$CURRENT_CONFIG_SHA" && "$nginx_after" == "$CURRENT_NGINX_SHA" &&
+     "$systemd_after" == "$CURRENT_SYSTEMD_SHA" ]] ||
+    fail "runtime, Nginx or systemd configuration changed during deployment"
+  ((SECONDS < CANDIDATE_DEADLINE)) || fail "candidate exhausted the reserved rollback window"
+  PREVIOUS_BINDING_STARTED=true
+  atomic_link "$CURRENT_BACKEND" "$BACKEND_PREVIOUS"
+  atomic_link "$CURRENT_ADMIN" "$ADMIN_PREVIOUS"
+  previous_temp="$(mktemp "$STATE_ROOT/.previous.XXXXXX")"
+  {
+    printf 'CURRENT_TAG=%s\nPREVIOUS_BACKEND=%s\nPREVIOUS_ADMIN=%s\n' "$tag" "$CURRENT_BACKEND" "$CURRENT_ADMIN"
+    printf 'PREVIOUS_BACKEND_SHA256=%s\nPREVIOUS_BACKEND_TREE_SHA256=%s\n' \
+      "$(file_sha "$CURRENT_JAR")" "$CURRENT_BACKEND_TREE_SHA"
+    printf 'PREVIOUS_ADMIN_SHA256=%s\n' "$CURRENT_ADMIN_TREE_SHA"
+    printf 'DATABASE_MIGRATIONS_SHA256=%s\n' "$CURRENT_MIGRATION_SHA"
+  } >"$previous_temp"
+  atomic_root_file "$PREVIOUS_IDENTITY" "$previous_temp"
+  rm -f "$previous_temp"
+  elapsed=$((SECONDS - OUTAGE_STARTED))
+  ((SECONDS < CANDIDATE_DEADLINE)) || fail "candidate bookkeeping exhausted the reserved rollback window"
+  write_state "$tag" deployed "$elapsed"
+  TRANSACTION_COMMITTED=true
+  TRANSACTION_ACTIVE=false
+  PREVIOUS_BINDING_STARTED=false
+  rm -f "$TRANSACTION_MARKER" || fail "healthy release committed but transaction marker cleanup failed"
+  ACTIVE_DEADLINE=0
+  printf 'DOWNTIME_SECONDS=%s\n' "$elapsed"
+}
+
+switch_fresh_release_pair() {
+  local tag="$1" flyway_after config_after nginx_after systemd_after elapsed
+  verify_fresh_state_unchanged
+  write_transaction_marker "$tag"
+  OUTAGE_STARTED="$SECONDS"
+  OUTAGE_DEADLINE=$((OUTAGE_STARTED + OUTAGE_LIMIT_SECONDS))
+  CANDIDATE_DEADLINE=$((OUTAGE_DEADLINE - RECOVERY_RESERVE_SECONDS))
+  ACTIVE_DEADLINE="$CANDIDATE_DEADLINE"
+  TRANSACTION_ACTIVE=true
+  CURRENT_PID=0
+  atomic_link "$BACKEND_RELEASES/$tag" "$BACKEND_CURRENT"
+  run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl start "$SERVICE"
+  wait_for_backend "$BACKEND_RELEASES/$tag" 0 || fail "initial candidate backend did not become healthy within 90 seconds"
+  flyway_after="$(flyway_snapshot)" ||
+    fail "initial candidate did not create exactly B33 and V34 through V40"
+  atomic_link "$ADMIN_RELEASES/$tag" "$ADMIN_CURRENT"
+  verify_admin_locally "$ADMIN_RELEASES/$tag" || fail "initial candidate Admin failed local Host root/deep-route checks"
+  run_with_timeout "$COMMAND_TIMEOUT_SECONDS" systemctl enable "$SERVICE"
+  ((SECONDS + 3 < CANDIDATE_DEADLINE)) || fail "initial candidate exhausted the recovery reserve before stability wait"
+  sleep 3
+  verify_service_contract "$BACKEND_RELEASES/$tag"
+  backend_health_up || fail "initial candidate backend failed the final health check"
+  verify_admin_locally "$ADMIN_RELEASES/$tag" || fail "initial candidate Admin failed final stability check"
+  [[ "$(flyway_snapshot)" == "$flyway_after" ]] || fail "Flyway history changed during initial stability check"
+  config_after="$(file_sha "$CONFIG_FILE")"; nginx_after="$(nginx_config_sha)"
+  systemd_after="$(systemd_contract_sha)" || fail "systemd service contract changed during initial deployment"
+  [[ "$config_after" == "$CURRENT_CONFIG_SHA" && "$nginx_after" == "$CURRENT_NGINX_SHA" &&
+     "$systemd_after" == "$CURRENT_SYSTEMD_SHA" ]] ||
+    fail "runtime, Nginx or systemd configuration changed during initial deployment"
+  ((SECONDS < CANDIDATE_DEADLINE)) || fail "initial candidate exhausted the reserved recovery window"
+  elapsed=$((SECONDS - OUTAGE_STARTED))
+  write_state "$tag" deployed "$elapsed"
+  TRANSACTION_COMMITTED=true
+  TRANSACTION_ACTIVE=false
+  rm -f "$TRANSACTION_MARKER" || fail "healthy initial release committed but transaction marker cleanup failed"
+  ACTIVE_DEADLINE=0
+  printf 'DOWNTIME_SECONDS=%s\n' "$elapsed"
+}
+
+preflight() {
+  local tag="$1" commit="$2" run_id="$3" bundle_sha="$4"
+  reject_reused_tag "$tag"
+  validate_runtime_configuration
+  load_database_binding
+  load_deployment_state
+  verify_candidate "$tag" "$commit" "$run_id" "$bundle_sha"
+  verify_capacity_and_backup_readiness
+  printf 'PREFLIGHT_OK=true\nDEPLOY_MODE=%s\nCURRENT_BACKEND=%s\nCURRENT_ADMIN=%s\n' \
+    "$DEPLOY_MODE" "$CURRENT_BACKEND" "$CURRENT_ADMIN"
+  printf 'FLYWAY_HISTORY_SHA256=%s\nDATABASE_MIGRATIONS_SHA256=%s\n' "$CURRENT_FLYWAY_SHA" "$CURRENT_MIGRATION_SHA"
+  rm -rf --one-file-system "$STAGING_ROOT"
+  STAGING_ROOT=''
+  CANDIDATE_ROOT=''
+}
+
+deploy() {
+  local tag="$1" commit="$2" run_id="$3" bundle_sha="$4"
+  reject_reused_tag "$tag"
+  validate_runtime_configuration
+  load_database_binding
+  load_deployment_state
+  verify_candidate "$tag" "$commit" "$run_id" "$bundle_sha"
+  verify_capacity_and_backup_readiness
+  if [[ "$DEPLOY_MODE" == fresh ]]; then
+    create_verified_backup "$tag" "$commit"
+    [[ "$(database_state_snapshot)" == "$CURRENT_FLYWAY_SHA" ]] ||
+      fail "database state changed after the fresh backup; service start was not attempted"
+    install_candidate "$tag"
+    switch_fresh_release_pair "$tag"
+  else
+    install_candidate "$tag"
+    create_verified_backup "$tag" "$commit"
+    [[ "$(flyway_snapshot)" == "$CURRENT_FLYWAY_SHA" ]] || fail "Flyway history changed after backup; service switch was not started"
+    switch_release_pair "$tag"
+  fi
+  rm -rf --one-file-system "$STAGING_ROOT"
+  STAGING_ROOT=''
+  CANDIDATE_ROOT=''
+  printf 'UAT Candidate 已部署，公网未 Ready\nTAG=%s\nCOMMIT=%s\nBACKUP_PATH=%s\n' "$tag" "$commit" "$BACKUP_PATH"
+}
+
+main() {
+  local action tag commit run_id bundle_sha
+  validate_arguments "$@"
+  action="$1"; tag="$2"; commit="$3"; run_id="$4"; bundle_sha="$5"
+  DEPLOY_TAG="$tag"; DEPLOY_COMMIT="$commit"; DEPLOY_RUN_ID="$run_id"; DEPLOY_BUNDLE_SHA="$bundle_sha"
+  validate_control_layout
+  exec 9<"$LOCK_FILE"
+  flock -n 9 || fail "another UAT deployment is active"
+  [[ ! -e "$TRANSACTION_MARKER" && ! -L "$TRANSACTION_MARKER" ]] ||
+    fail "an unresolved deployment transaction blocks new work"
+  [[ -n "$PATH_PREFIX" ]] || cd "$STATE_ROOT"
+  case "$action" in
+    preflight) preflight "$tag" "$commit" "$run_id" "$bundle_sha" ;;
+    deploy) deploy "$tag" "$commit" "$run_id" "$bundle_sha" ;;
+  esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

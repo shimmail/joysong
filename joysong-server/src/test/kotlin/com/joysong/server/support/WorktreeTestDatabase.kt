@@ -14,13 +14,16 @@ object WorktreeTestDatabase {
     }
 
     internal fun databaseName(worktreeDirectoryName: String): String {
-        val worktreeId = worktreeDirectoryName
+        val normalized = worktreeDirectoryName
             .replace(Regex("[^A-Za-z0-9]+"), "_")
             .trim('_')
             .lowercase()
+        require(normalized.isNotBlank()) { "Worktree directory name cannot be empty" }
+        val normalizedId = normalized.removePrefix("worktree_")
+        val worktreeId = "worktree_$normalizedId"
         val databaseName = "myapp_$worktreeId"
         require(databaseName.startsWith("myapp_worktree_")) {
-            "Migration tests require a worktree directory beginning with worktree_: $worktreeDirectoryName"
+            "Migration tests require an isolated worktree database: $worktreeDirectoryName"
         }
         return databaseName
     }

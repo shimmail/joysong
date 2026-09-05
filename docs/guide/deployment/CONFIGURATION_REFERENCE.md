@@ -1,72 +1,80 @@
-# JoySong 部署配置字典（主指南附录）
+# JoySong 部署配置字典
 
-> 文档状态：[部署与发布主指南](./README.md)的字段附录，不构成第二套部署流程
-> 适用环境：Dev、UAT、Prod
-> 最后核验：2026-09-04
-> 安全要求：本文只记录变量名、语义和示例格式，绝不记录真实密码、Token、手机号或 AccessKey。
+> 本文是 [UAT 部署指南](./README.md) 的配置字典，不构成第二套部署流程。
+>
+> 最后核验：2026-09-05
+>
+> 这里只记录键名、语义和安全边界，不记录真实密码、Token、手机号或 AccessKey。
 
-## 1. 配置来源与优先级
-
-服务端配置按 Spring Boot 标准优先级加载。线上环境以 ECS root-owned 环境文件为运行时来源，仓库文件只提供键名、默认值和安全约束。
+## 1. 配置来源
 
 | 来源 | 用途 | 是否可含秘密 |
 | --- | --- | --- |
 | `application.yml` | 公共默认值和变量绑定 | 否 |
-| `application-dev.yml` | 本地开发默认值 | 只允许明确的本地假值 |
-| `application-demo.yml` | UAT/Demo 强安全边界 | 否 |
-| `application-prod.yml` | Prod 强安全边界 | 否 |
-| ECS `/etc/joysong/<env>/joysong.env` | 线上运行时配置 | 是，root-owned `0640` |
-| GitHub Repository Variables | UAT 公网 origin 与全局 Prod 开关 | 否 |
-| GitHub Repository Secrets | UAT Android 签名材料 | 仅构建秘密 |
-| GitHub Environment Variables | 每个环境独立的阿里云资源标识 | 否 |
-| GitHub `production` Environment Secrets | Prod Android 签名材料 | 仅构建秘密 |
-| Flutter `--dart-define` | 客户端公开构建值 | 否 |
+| `application-demo.yml` | Demo/UAT 强安全边界 | 否 |
+| `/etc/joysong-demo/joysong.env` | 当前 UAT 运行时配置 | 是，`root:joysong-demo`、`0640` |
+| `/etc/mysql/joysong-uat-backup.cnf` | root-only 备份账号 | 是，`root:root`、`0600` |
+| bootstrap `<secrets-dir>` | 首次主机初始化输入 | 是，三个 `root:root`、`0600` 普通文件 |
+| GitHub workflow | 非秘密发布规则和固定路径 | 否 |
+| GitHub Actions Artifact | 本次 run 的发布制品 | 否，不得包含运行时配置 |
+| Self-hosted Runner 本地配置 | 仓库 Runner 注册和调度 | 仅 GitHub Runner 自管凭据 |
 
-禁止将 ECS 环境文件、数据库导出、keystore、私钥或真实凭据提交到 Git。开发机和 CI 临时生成的签名文件必须被忽略并在构建后删除。
+首次 apply 要求 `<secrets-dir>` 必须且只含 `joysong.env`、`joysong-uat-backup.cnf` 和 `runner-registration-token`；三者必须是 `root:root`、`0600` 的单硬链接普通文件。注册成功后 token 被消费并删除，二次 apply 要求目录必须且只含剩余两份输入。任何额外、缺失、链接或多硬链接成员均拒绝。禁止把 ECS 环境文件、数据库导出、应用秘密、TLS 私钥、GitHub Token 或 Runner 凭据提交到 Git、写入 Artifact、Draft Release 或 Issue。
 
-## 2. 环境标识
+## 2. 环境与服务 identity
 
-| 变量/接口 | Dev | UAT | Prod | 说明 |
-| --- | --- | --- | --- | --- |
-| `SPRING_PROFILES_ACTIVE` | `dev` | `demo` | `prod` | UAT 继续复用安全 `demo` profile |
-| Flutter `APP_ENV` | `development` | `uat` | `production` | `staging` 仅作为 `uat` 兼容别名 |
-| Android flavor | 开发默认 | `uat` | `prod` | Native flavor 与 Dart 环境必须同时正确 |
-| `TZ` | `Asia/Shanghai` | `Asia/Shanghai` | `Asia/Shanghai` | 主机、JVM 和数据库时区保持一致 |
+| 项目 | 当前 UAT 固定值 | 约束 |
+| --- | --- | --- |
+| release environment | `uat` | tag 和 manifest 使用；不表示已公网 Ready |
+| Spring profile | `demo` | 不创建新的 `uat` profile |
+| systemd unit | `joysong-demo.service` | 不替换为 `joysong@uat` |
+| systemd 用户/组 | `joysong-demo` | Runner 不加入该组 |
+| Nginx 用户/组 | `www-data` | Ubuntu 24.04 固定契约；Runner 不加入该组 |
+| Backend bind | `127.0.0.1:8080` | 不监听公网或 8081 |
+| Backend 工作目录 | `/opt/joysong-demo/current` | 由仓库 systemd 模板决定并由 host-contract 核验 |
+| 环境文件 | `/etc/joysong-demo/joysong.env` | root-owned，Runner 不可读 |
+| 时区 `TZ` | 由首次 `joysong.env` 明确提供 | tag 部署不覆盖应用时区 |
 
-`demo` 不得与 `dev` 或 `prod` 同时激活。Prod 部署脚本只接受精确的 `prod`，不得用字符串包含或默认回退判断环境。
+部署脚本可在内部称此固定布局为 in-place UAT，但这不是新的 profile、service 或公网环境。
 
 ## 3. 服务与公网地址
 
-| 变量 | 敏感 | UAT | Prod | 约束 |
-| --- | --- | --- | --- | --- |
-| `SERVER_ADDRESS` | 否 | 必填 | 必填 | 固定 `127.0.0.1`，禁止直接监听公网 |
-| `SERVER_PORT` | 否 | `8081` | `8080` | 两环境不得共用端口 |
-| `SERVER_BASE_URL` | 否 | 必填 | 必填 | 绝对 HTTPS URL，无路径凭据、查询或片段 |
-| `APP_SHARE_BASE_URL` | 否 | 必填 | 必填 | 指向 `/s/diary/` 根路径的绝对 HTTPS URL |
-| `CORS_ALLOWED_ORIGINS` | 否 | 必填 | 必填 | 逗号分隔的精确 HTTPS origin，禁止 `*` |
-| `SERVER_FORWARD_HEADERS_STRATEGY` | 否 | `native` | `native` | 信任受控 Nginx 转发头 |
-| `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES` | 否 | 必填 | 必填 | 只匹配本机反向代理 |
-| `SERVER_TOMCAT_REMOTEIP_REMOTE_IP_HEADER` | 否 | `X-Forwarded-For` | 同左 | 与 Nginx 一致 |
-| `SERVER_TOMCAT_REMOTEIP_PROTOCOL_HEADER` | 否 | `X-Forwarded-Proto` | 同左 | 与 Nginx 一致 |
-| `SERVER_TOMCAT_REMOTEIP_HOST_HEADER` | 否 | `X-Forwarded-Host` | 同左 | 与 Nginx 一致 |
-| `SERVER_TOMCAT_REMOTEIP_PORT_HEADER` | 否 | `X-Forwarded-Port` | 同左 | 与 Nginx 一致 |
+| 变量 | 敏感 | 当前 UAT 约束 |
+| --- | --- | --- |
+| `SPRING_PROFILES_ACTIVE` | 否 | 精确为 `demo` |
+| `SERVER_ADDRESS` | 否 | 精确为 `127.0.0.1` |
+| `SERVER_PORT` | 否 | 精确为 `8080` |
+| `SERVER_BASE_URL` | 否 | 由首次 secrets 明确提供，tag 发布不改 |
+| `APP_SHARE_BASE_URL` | 否 | 与 Server origin 一致，tag 发布不改 |
+| `CORS_ALLOWED_ORIGINS` | 否 | 首次明确精确 origin，禁止 `*` |
+| `SERVER_FORWARD_HEADERS_STRATEGY` | 否 | 与现有 Nginx 转发头一致 |
+| `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES` | 否 | 只信任本机反向代理 |
+| `SERVER_TOMCAT_REMOTEIP_REMOTE_IP_HEADER` | 否 | 与 Nginx 一致 |
+| `SERVER_TOMCAT_REMOTEIP_PROTOCOL_HEADER` | 否 | 与 Nginx 一致 |
+| `SERVER_TOMCAT_REMOTEIP_HOST_HEADER` | 否 | 与 Nginx 一致 |
+| `SERVER_TOMCAT_REMOTEIP_PORT_HEADER` | 否 | 与 Nginx 一致 |
+| Nginx 配置 identity | 否 | bootstrap 安装的仓库模板及 root-only host-contract；tag 发布前后摘要必须不变 |
+| Admin 本机校验 | 否 | `Host: joyingsong.net` 请求 `127.0.0.1:80` 的 `/` 与 `/orders` |
 
-当前 UAT 从 HTTP 迁移到 HTTPS 时，`SERVER_BASE_URL`、`APP_SHARE_BASE_URL`、`CORS_ALLOWED_ORIGINS`、Nginx、DNS、证书和 Flutter `API_BASE_URL` 必须作为同一变更发布。
+bootstrap 负责首次安装 Nginx 契约；候选 tag 发布不修改 Nginx、DNS、证书或这些公网 origin。后续 TLS 窗口必须把环境变量、Nginx、DNS 和客户端配置作为一个独立变更统一验证；完成前仍是“UAT Candidate 已部署，公网未 Ready”。
 
 ## 4. 数据库与 Flyway
 
-| 变量 | 敏感 | UAT | Prod | 约束 |
-| --- | --- | --- | --- | --- |
-| `DB_URL` | 部分 | 必填 | 必填 | JDBC MySQL URL；不得含 `createDatabaseIfNotExist` |
-| `DB_USERNAME` | 是 | 必填 | 必填 | UAT/Prod 独立账号 |
-| `DB_PASSWORD` | 是 | 必填 | 必填 | 只在 ECS 环境文件和受控测试会话中出现 |
-| `DEMO_DATABASE_NAME` | 否 | 必填 | 禁止 | 必须与 JDBC 和 `SELECT DATABASE()` 一致 |
+| 变量/文件 | 敏感 | 当前 UAT 约束 |
+| --- | --- | --- |
+| `DB_URL` | 部分 | JDBC MySQL URL；不得含 `createDatabaseIfNotExist` |
+| `DB_USERNAME` | 是 | 只在 ECS 环境文件中 |
+| `DB_PASSWORD` | 是 | 只在 ECS 环境文件中 |
+| `DEMO_DATABASE_NAME` | 否 | 精确为 `myapp_worktree_uat`，并与 JDBC 选择及 `SELECT DATABASE()` 完全一致 |
+| `/etc/mysql/joysong-uat-backup.cnf` | 是 | 普通非链接文件，`root:root`、`0600` |
 
-UAT 数据库名必须以 `myapp_worktree_` 开头。迁移或 Demo 数据操作前必须输出数据库主机、数据库名和环境，并由操作者确认。
+UAT 活动数据库名必须精确为 `myapp_worktree_uat`。任何迁移、备份或恢复动作前都必须打印实际 host/name；日志不得输出账号或密码。
 
-线上固定 Flyway 约束：
+bootstrap 创建的应用账号只获得该库的数据库级权限且没有 `GRANT OPTION`；独立备份账号只获得该库的 `SELECT`、`SHOW VIEW`、`TRIGGER`、`LOCK TABLES`，以及 `mysqldump --routines` 在 MySQL 8 所需的全局动态 `SHOW_ROUTINE`，并在二次 apply 时精确复核这些授权。
 
-| Spring 属性 | UAT / Prod |
+固定 Flyway 属性：
+
+| Spring 属性 | 值 |
 | --- | --- |
 | `spring.jpa.hibernate.ddl-auto` | `validate` |
 | `spring.flyway.enabled` | `true` |
@@ -74,298 +82,193 @@ UAT 数据库名必须以 `myapp_worktree_` 开头。迁移或 Demo 数据操作
 | `spring.flyway.baseline-on-migrate` | `false` |
 | `spring.flyway.clean-disabled` | `true` |
 
-任何迁移变化都必须在新建的空白隔离数据库上验证。UAT 重建使用新安全前缀数据库；Prod 恢复到新 RDS，均不得原地 clean/reset。
+fresh preflight 要求无业务表和 Flyway history；首次部署只接受当前 JAR 将空库迁移为成功的 B33 和 V34…V40。existing 要求当前历史精确为该集合，candidate 与 current JAR 的 migration digest 完全相同，并在备份前、停机前、启动后和最终检查时保持完整快照一致。
+
+恢复只允许写入此前不存在的 `myapp_worktree_restore_*` 数据库。不得覆盖、drop、reset 或 clean 当前数据库。
 
 ## 5. JWT、管理员与认证
 
-| 变量 | 敏感 | UAT | Prod | 约束 |
-| --- | --- | --- | --- | --- |
-| `JWT_SECRET` | 是 | 必填 | 必填 | 至少 32 字符，环境隔离并支持轮换 |
-| `ADMIN_PHONE` | 是 | 必填 | 必填 | 裸 11 位中国大陆号码，不含 `+86` |
-| `ADMIN_PASSWORD` | 是 | 仅首次空库 | 仅首次空库 | 12–128 字符；创建后立即移除 |
-| `GOOGLE_CLIENT_ID` | 否 | 不设置 | 启用 Google 时必填 | UAT 关闭 Google 登录 |
-| `GOOGLE_PROXY_URL` | 否 | 不设置 | 可选 | 仅服务端受控出站代理 |
-| `SMS_ENABLED` | 否 | `false` | 验收后决定 | UAT 禁止短信 |
-
-UAT App 只显示密码登录。验证码、注册、找回密码和 Google 登录即使有底层代码，也不得由 UAT UI 暴露；服务端 SMS 和 Google 配置同时保持关闭。
-
-<a id="admin-bootstrap"></a>
-
-### 5.1 首次管理员初始化
-
-仅当 Flyway 完成且 `users=0` 时临时提供 `ADMIN_PASSWORD`：
-
-1. 记录实际数据库主机、数据库名和 active profile。
-2. 确认 `ADMIN_PHONE` 是裸 11 位号码，临时密码长度为 12–128 字符。
-3. 只启动一个后端实例，等待管理员创建。
-4. 使用 `ADMIN_PHONE` 和首次密码验证 Admin 登录。
-5. 记录管理员 userId、角色、状态、账号总数和密码哈希指纹；不得记录密码或完整哈希。
-6. 停止应用，从环境文件彻底移除 `ADMIN_PASSWORD`。
-7. 使用同一数据库重启，确认管理员信息和密码哈希未变化，原密码仍可登录。
-
-首次管理员固定为 `ACTIVE + ADMIN`，昵称为“系统管理员”，不自动获得医生、顾问或机构法人身份。再次设置 `ADMIN_PASSWORD` 不会重置已存在管理员的密码。
-
-| 配置和数据状态 | 结果 |
-| --- | --- |
-| `users=0` 且手机号、首次密码合法 | 创建唯一固定管理员 |
-| `users=0` 但首次密码缺失或长度不合法 | 拒绝启动 |
-| `ADMIN_PHONE` 不是裸 11 位号码 | 拒绝启动 |
-| 已有匹配 `ACTIVE + ADMIN` 且密码哈希非空 | 只验证，不写入 |
-| 非空用户表缺少配置号码或只改了 `ADMIN_PHONE` | 拒绝启动 |
-| 配置号码属于普通、暂停、注销或无密码账号 | 拒绝启动 |
-| 固定号码或 `+86` 等价号被其他非 ERASED 账号占用 | 拒绝启动 |
-| 存在第二个非 ERASED 管理员 | 拒绝启动 |
-
-<a id="admin-phone-rotation"></a>
-
-### 5.2 已创建管理员的停机改号
-
-产品目前没有在线管理员改号或角色转移接口。确需更换时必须进入维护窗口、停止所有连接目标库的实例并创建可恢复备份。
-
-新裸号及其 `+86` 等价号必须在所有非 ERASED 账号中无人占用。先记录固定管理员 userId，再在同一个持续数据库 session 中执行：
-
-```sql
-SET @old_phone = '替换为旧裸号';
-SET @new_phone = '替换为新裸号';
-SET @admin_id = '替换为固定管理员userId';
-
-START TRANSACTION;
-
-SELECT guard_key
-FROM admin_account_guard
-WHERE guard_key = 'ACTIVE_ADMIN'
-FOR UPDATE;
-
-SELECT id, phone, role, account_state, password_hash
-FROM users
-WHERE role = 'ADMIN' AND account_state <> 'ERASED'
-FOR UPDATE;
-
-SELECT id, phone, role, account_state
-FROM users
-WHERE phone IN (@new_phone, CONCAT('+86', @new_phone))
-FOR UPDATE;
-
-UPDATE users
-SET phone = @new_phone,
-    credentials_updated_at = NOW(),
-    updated_at = NOW()
-WHERE id = @admin_id
-  AND phone = @old_phone
-  AND role = 'ADMIN'
-  AND account_state = 'ACTIVE'
-  AND TRIM(password_hash) <> '';
-
-SELECT ROW_COUNT() AS admin_rows_updated;
-```
-
-`admin_rows_updated` 不等于 `1` 时只执行 `ROLLBACK;`。等于 `1` 时，在同一 session 撤销全部刷新令牌并提交：
-
-```sql
-UPDATE refresh_tokens
-SET revoked_at = COALESCE(revoked_at, NOW())
-WHERE user_id = @admin_id;
-
-COMMIT;
-```
-
-随后在应用仍停止时更新 `ADMIN_PHONE`，不得设置 `ADMIN_PASSWORD`。启动一个实例并验证：
-
-- userId、密码哈希指纹、昵称、角色和状态保持不变；
-- 新号码加原密码登录成功，旧号码失败；
-- 改号前 access token 和 refresh token 失效；
-- 再次无 `ADMIN_PASSWORD` 重启仍通过校验。
-
-失败回滚必须同时恢复数据库号码与 `ADMIN_PHONE`。若新号码阶段已启动或登录，还要再次更新 `credentials_updated_at` 并撤销全部 refresh token。
-
-## 6. 公共与私有文件
-
-| 变量 | 敏感 | UAT | Prod | 约束 |
-| --- | --- | --- | --- | --- |
-| `UPLOAD_LOCAL_DIR` | 否 | 必填 | 按存储方案 | 公共图片本地目录 |
-| `UPLOAD_STAGING_DIR` | 否 | 必填 | 必填 | 暂存目录，不得由 Nginx 暴露 |
-| `UPLOAD_PRIVATE_DIR` | 否 | 必填 | 必填 | 身份/退款等私有文件，禁止公网暴露 |
-| `UPLOAD_IDEMPOTENCY_CLEANUP_DELAY_MS` | 否 | 可选 | 可选 | 上传幂等占位清理延时 |
-| `PRIVATE_FILE_STORAGE_MODE` | 否 | `local` | `local` 或经批准的 `oss` | 私有存储模式 |
-
-当前 UAT 已启用 OSS：新公共图片通过 ECS RAM Role 写入 UAT Bucket，`/images/` 只兼容历史 `UPLOAD_LOCAL_DIR` URL。`UPLOAD_PRIVATE_DIR` 和 staging 目录必须使用独立权限并纳入备份，绝不配置 Nginx alias。
-
-OSS 配置：
-
-| 变量 | 敏感 | 约束 |
+| 变量 | 敏感 | 当前 UAT 约束 |
 | --- | --- | --- |
-| `OSS_ENABLED` | 否 | 当前 UAT 为 `true`；其他环境按能力显式设置 |
-| `OSS_ENDPOINT` | 否 | 必须是带 `https://` 的合法 Endpoint |
-| `OSS_REGION` | 否 | 必须与 Bucket 地域一致 |
-| `OSS_CREDENTIAL_MODE` | 否 | 当前 UAT 固定 `ecs-ram-role`，兼容模式才用 `static` |
-| `OSS_ECS_RAM_ROLE_NAME` | 否 | `ecs-ram-role` 时必填 |
-| `OSS_ACCESS_KEY_ID` | 是 | 仅 `static` 模式；不得进入客户端 |
-| `OSS_ACCESS_KEY_SECRET` | 是 | 仅 `static` 模式；不得进入客户端 |
-| `OSS_BUCKET_NAME` | 否 | 公共业务图片 Bucket |
-| `OSS_PRIVATE_BUCKET_NAME` | 否 | 私有 OSS 模式使用，不得走公共 CDN |
-| `OSS_PUBLIC_BASE_URL` | 否 | 公共图片 HTTPS 根地址 |
-| `OSS_CONNECTION_TIMEOUT_MS` | 否 | 默认 5000 |
-| `OSS_SOCKET_TIMEOUT_MS` | 否 | 默认 30000 |
-| `OSS_REQUEST_TIMEOUT_MS` | 否 | 默认 60000 |
-| `OSS_MAX_ERROR_RETRY` | 否 | 默认 1 |
-| `OSS_MAX_CONNECTIONS` | 否 | 默认 32 |
+| `JWT_SECRET` | 是 | 只留在 ECS，至少 32 字符 |
+| `ADMIN_PHONE` | 是 | 首次 secrets 提供，不写入发布证据 |
+| `ADMIN_PASSWORD` | 是 | 只允许首次空库临时使用；常规发布不得设置 |
+| `GOOGLE_CLIENT_ID` | 否 | 当前 UAT 不设置 |
+| `GOOGLE_PROXY_URL` | 否 | 当前 UAT 不设置 |
+| `SMS_ENABLED` | 否 | 当前 UAT 为 `false` |
 
-发布 Bucket 与业务图片 Bucket 是两个权限域。GitHub 发布身份不得写业务 Bucket，应用运行身份不得写发布 Bucket。
+existing 发布事务不得创建、修改或输出管理员凭据，也不得用部署健康检查替代登录验收。fresh 首次空库仅可用 `ADMIN_PASSWORD` 完成初始化；首次健康成功后必须原子移除该键、受控重启并复验。管理员手机号轮换是独立、可审计的运维动作，不得夹带在后续 tag 发布中。
 
-## 7. AI 与翻译
+## 6. 持久文件与业务 Bucket
 
-| 变量 | 敏感 | UAT | Prod |
-| --- | --- | --- | --- |
-| `AI_AGENT_PROVIDER` | 否 | `qwen` | 经验收 provider |
-| `AI_AGENT_API_KEY` | 是 | 必填 | 必填 |
-| `AI_AGENT_BASE_URL` | 否 | HTTPS | HTTPS |
-| `AI_AGENT_MODEL` | 否 | 必填 | 必填 |
-| `AI_AGENT_INTENT_MODEL` | 否 | 必填 | 必填 |
-| `TRANSLATION_PROVIDER` | 否 | `qwen` | 经验收 provider |
-| `TRANSLATION_API_KEY` | 是 | 必填 | 必填 |
-| `TRANSLATION_BASE_URL` | 否 | HTTPS | HTTPS |
-| `TRANSLATION_MODEL` | 否 | 必填 | 必填 |
-
-健康检查不代表 AI 或翻译真实可用。UAT 验收必须分别发起一次公网调用，并配置额度、错误率和费用告警。
-
-## 8. SMS
-
-| 变量 | 敏感 | UAT | Prod |
-| --- | --- | --- | --- |
-| `SMS_ENABLED` | 否 | `false` | 审核和验收后才可为 `true` |
-| `SMS_ACCESS_KEY_ID` | 是 | 不设置 | 启用时必填 |
-| `SMS_ACCESS_KEY_SECRET` | 是 | 不设置 | 启用时必填 |
-| `SMS_SIGN_NAME` | 否 | 不设置 | 启用时必填 |
-| `SMS_TEMPLATE_CODE` | 否 | 不设置 | 启用时必填 |
-
-短信身份必须与 OSS、GitHub 发布身份隔离。虚构 Demo 号码不得用于真实发送。
-
-## 9. 支付安全门
-
-| 变量 | Dev | UAT | Prod |
-| --- | --- | --- | --- |
-| `ALIPAY_PLUS_SIMULATED_ENABLED` | 可为 true | `true` | 强制 `false` |
-| `ALIPAY_PLUS_AUTO_PAY_ON_ORDER_CREATE_ENABLED` | 可为 true | 强制 `false` | 强制 `false` |
-| `PAYMENT_RECONCILIATION_ENABLED` | 按开发需要 | 强制 `false` | 真实渠道完成后再决定 |
-| `STRIPE_LEGACY_ENABLED` | 默认 false | 强制 `false` | 当前强制 `false` |
-
-UAT 模拟能力仅允许手工创建支付尝试和管理员批准后的全额退款。自动支付、部分退款、真实支付、主动查询、Webhook、对账和失败注入均不属于 UAT。
-
-Prod 采用三层门禁：
-
-1. 模拟网关 profile 永不包含 `prod`。
-2. Prod 启动校验发现模拟或自动支付为 true 时拒绝启动。
-3. ECS 部署 dispatcher 再校验 profile 和两个开关。
-
-legacy Stripe 当前仍存在开启后创建新 Checkout 的代码风险。本期不修改该代码，因此 `STRIPE_LEGACY_ENABLED` 保持 false，并阻断交易型 Prod。
-
-## 10. Demo 数据
-
-| 变量 | UAT | 说明 |
+| 变量/路径 | 敏感 | 当前 UAT 约束 |
 | --- | --- | --- |
-| `DEMO_DATA_ENABLED` | 常规服务固定 `false` | 防止启动时重复执行 |
-| `DEMO_DATA_ACTION` | 临时 `APPLY` 或 `VERIFY` | 首次人工 Apply，发布只 Verify |
-| `DEMO_CATALOG_PATH` | 临时绝对路径 | 指向本次批准 catalog |
-| `DEMO_ACCOUNT_PASSWORD` | 临时秘密 | 只在 Apply/验收说明生成会话中使用 |
+| `UPLOAD_LOCAL_DIR` | 否 | 固定为 `/var/lib/joysong-demo/uploads` 并纳入适用备份 |
+| `UPLOAD_STAGING_DIR` | 否 | 固定为 `/var/lib/joysong-demo/upload-staging`，不由 Nginx 暴露 |
+| `UPLOAD_PRIVATE_DIR` | 否 | 固定为 `/var/lib/joysong-demo/private`，禁止公网暴露 |
+| `UPLOAD_IDEMPOTENCY_CLEANUP_DELAY_MS` | 否 | 由首次配置明确，tag 发布不调参 |
+| `PRIVATE_FILE_STORAGE_MODE` | 否 | 由首次配置明确，tag 发布不切换 |
+| `OSS_ENABLED` | 否 | 由首次配置明确，tag 发布不切换 |
+| `OSS_BUCKET_NAME` | 否 | `joysong-demo-media-cn-hangzhou-1335549182926992` |
+| `OSS_PRIVATE_BUCKET_NAME` | 否 | `joysong-demo-private-cn-hangzhou-1335549182926992` |
+| `OSS_ENDPOINT` / `OSS_REGION` | 否 | 首次配置绑定杭州，tag 发布不改 |
+| `OSS_CREDENTIAL_MODE` | 否 | 首次配置明确；Runner 不继承 |
+| `OSS_ECS_RAM_ROLE_NAME` | 否 | 若使用则必须与已批准实例角色一致；本流程不创建或修改角色 |
+| `OSS_PUBLIC_BASE_URL` | 否 | 首次配置明确业务对象地址，本流程不改域名 |
+| `OSS_CONNECTION_TIMEOUT_MS` / `OSS_SOCKET_TIMEOUT_MS` / `OSS_REQUEST_TIMEOUT_MS` | 否 | 首次配置明确，tag 发布不调参 |
+| `OSS_MAX_CONNECTIONS` / `OSS_MAX_ERROR_RETRY` | 否 | 首次配置明确，tag 发布不调参 |
+| `OSS_ACCESS_KEY_ID` | 是 | 不得进入 GitHub、Runner 或发布包 |
+| `OSS_ACCESS_KEY_SECRET` | 是 | 不得进入 GitHub、Runner 或发布包 |
 
-Apply/Verify 前必须再次通过数据库安全门。文档不固定 catalog 数量、版本或 SHA；这些事实写入 Release manifest 和验收 Issue。
+两个业务 Bucket 已存在，部署不得修改 ACL、权限、对象、生命周期或覆盖策略，不得把它们当发布制品仓库。Self-hosted Runner 不持有业务 OSS 权限。
 
-## 11. Flutter 构建参数
+应用 release 清理绝不能删除 uploads、private、staging 或业务 OSS 对象。必要持久目录必须在停机前形成 root-only 校验备份。
 
-| 参数 | UAT | Prod | 是否可进 APK |
-| --- | --- | --- | --- |
-| `APP_ENV` | `uat` | `production` | 是 |
-| `API_BASE_URL` | UAT HTTPS API | Prod HTTPS API | 是 |
-| `GOOGLE_SERVER_CLIENT_ID` | 不传 | 启用 Google 时传公开 Web Client ID | 是 |
-| `GOOGLE_IOS_CLIENT_ID` | 不传 | iOS 启用时传公开 Client ID | 是 |
+## 7. AI、翻译、SMS 与支付
 
-UAT Android 固定：
+| 变量 | 敏感 | 当前 UAT 约束 |
+| --- | --- | --- |
+| `AI_AGENT_PROVIDER` | 否 | 由首次配置明确，tag 发布不切换 |
+| `AI_AGENT_API_KEY` | 是 | 只留在 ECS 环境文件 |
+| `AI_AGENT_BASE_URL` / `AI_AGENT_MODEL` | 否 | 由首次配置明确，tag 发布不改 |
+| `AI_AGENT_INTENT_MODEL` | 否 | 由首次配置明确，tag 发布不改 |
+| `TRANSLATION_PROVIDER` | 否 | 由首次配置明确，tag 发布不切换 |
+| `TRANSLATION_API_KEY` | 是 | 只留在 ECS 环境文件 |
+| `TRANSLATION_BASE_URL` / `TRANSLATION_MODEL` | 否 | 由首次配置明确，tag 发布不改 |
+| `SMS_ENABLED` | 否 | `false` |
+| `SMS_ACCESS_KEY_ID` / `SMS_ACCESS_KEY_SECRET` | 是 | SMS 关闭时不设置；不得进入发布链路 |
+| `SMS_SIGN_NAME` / `SMS_TEMPLATE_CODE` | 否 | SMS 关闭时不设置 |
+| `ALIPAY_PLUS_SIMULATED_ENABLED` | 否 | 由首次配置明确，tag 发布不切换 |
+| `ALIPAY_PLUS_AUTO_PAY_ON_ORDER_CREATE_ENABLED` | 否 | `false` |
+| `PAYMENT_RECONCILIATION_ENABLED` | 否 | `false` |
+| `STRIPE_LEGACY_ENABLED` | 否 | `false` |
 
-- flavor `uat`；
-- applicationId `com.joysong.app.uat`；
-- Deep Link `joysong-uat`；
-- UAT 专用 keystore；
-- universal APK，不拆 ABI。
+这些运行时值不进入 manifest。`/actuator/health` 成功也不证明 AI、翻译、SMS 或支付业务可用；业务能力由后续 UAT 验收确认。
 
-Prod 对应 flavor `prod`、applicationId `com.joysong.app`、Deep Link `joysong` 和独立 Prod keystore。
+## 8. Demo 数据
 
-APK 绝不能包含数据库、JWT、OSS/SMS AccessKey、AI/翻译 Key、GitHub Token 或 TLS 私钥。
-
-## 12. GitHub 配置
-
-GitHub Environment 名称必须精确为 `uat` 和 `production`。同名 Environment Variable 会覆盖仓库级同名值，因此阿里云变量不要在 Repository Variables 中再配置一份“默认值”。
-
-### 12.1 Repository Variables
-
-| 变量 | 值/用途 |
+| 变量 | 当前 UAT 约束 |
 | --- | --- |
-| `UAT_API_BASE_URL` | 当前 `https://api.joyingsong.net`；迁移后 `https://api-uat.joyingsong.net` |
-| `UAT_ADMIN_BASE_URL` | 当前 `https://joyingsong.net`；迁移后 `https://uat.joyingsong.net` |
-| `PROD_DEPLOY_ENABLED` | 默认且当前必须为 `false`；Prod 第一层门禁 |
+| `DEMO_DATA_ENABLED` | 常规服务固定为 `false` |
+| `DEMO_DATA_ACTION` | 为空或 `VERIFY`；发布不得执行 `APPLY` |
+| `DEMO_CATALOG_PATH` | 常规发布不设置临时 catalog |
+| `DEMO_ACCOUNT_PASSWORD` | 常规发布不设置 |
 
-两个 UAT URL 必须作为批准的一组同时变更。仅允许上述精确 HTTPS origin：不带凭据、自定义端口、路径、查询或片段，不能把当前 API 与未来 Admin 混成一组。
+部署流程不得重建 Demo 数据或借发布执行 seed。
 
-### 12.2 Environment Variables
+## 9. 主机路径与权限
 
-以下键分别配置在 `uat` 和 `production` Environment；键名相同，值必须指向各自独立资源：
+| 路径 | owner/访问边界 | 用途 |
+| --- | --- | --- |
+| `/opt/joysong-demo/releases/<tag>` | root 管理，应用只读 | Backend 不可变 release |
+| `/opt/joysong-demo/current` | root 管理的 symlink | 当前 Backend |
+| `/opt/joysong-demo/previous` | root 管理的 symlink | 上一 Backend |
+| `/var/www/joysong-demo/releases/<tag>` | root 管理，Nginx 只读 | Admin 不可变 release |
+| `/var/www/joysong-demo/current` | root 管理的 symlink | 当前 Admin |
+| `/var/www/joysong-demo/previous` | root 管理的 symlink | 上一 Admin |
+| `/var/lib/joysong-deploy/state` | root-only | 锁、事务、pair identity |
+| `/var/lib/joysong-deploy/backups` | root-only | 校验后的配置/DB/数据备份 |
+| `/var/lib/joysong-deploy/incoming` | Runner 仅能写受控 run 子目录 | 待验证 Artifact |
+| `/var/lib/joysong-demo/uploads` | `joysong-demo:www-data`，Runner 不可写 | 公共上传持久目录 |
+| `/var/lib/joysong-demo/private` | 应用可用，Runner 不可读/遍历 | 私密持久目录 |
+| `/var/lib/joysong-demo/upload-staging` | 应用可用，Runner 不可读/遍历 | 上传暂存目录 |
+| `/opt/joysong-actions-runner` | `joysong-gh-runner` | Runner 程序 |
+| `/var/lib/joysong-actions-runner` | `joysong-gh-runner` | Runner work |
+| `/usr/local/sbin/joysong-uat-deploy` | `root:root`，不可被 Runner 修改 | 唯一 sudo 部署入口 |
+| `/etc/joysong-demo/host-contract` | `root:root`、`0600` | 仅 `SYSTEMD_UNIT_SHA256` 与 `NGINX_SITE_SHA256` |
+| `/etc/systemd/system/joysong-demo.service` | `root:root`，由 bootstrap 安装 | 仓库 `systemd/joysong-demo.service` 的固定副本 |
+| `/etc/nginx/conf.d/joysong-public.conf` | `root:root`，Nginx 读取 | 仓库 `nginx/joysong-public.conf` 的固定副本 |
 
-| 变量 | 格式/用途 |
-| --- | --- |
-| `ALIYUN_REGION` | ECS、OSS 和命令所在地域，例如 `cn-hangzhou` |
-| `ALIYUN_OIDC_PROVIDER_ARN` | `acs:ram::<account-id>:oidc-provider/<provider-name>` |
-| `ALIYUN_OIDC_ROLE_ARN` | 对应环境的最小权限 RAM Role，UAT/Prod 不得相同 |
-| `ALIYUN_ECS_INSTANCE_ID` | 对应环境的唯一 ECS 实例 ID |
-| `ALIYUN_RELEASE_BUCKET` | Private、业务图片之外的发布 Bucket 名 |
-| `ALIYUN_RELEASE_PREFIX` | JoySong 发布根前缀；工作流再附加 `/uat` 或 `/prod` |
+部署入口必须拒绝 symlink、hardlink、特殊文件、越界路径、非预期 owner/mode、重复 tag 和非空目标 release。
 
-仅在 `production` Environment 增加：
+## 10. Bootstrap 与 Runner 配置
 
-| 变量 | 格式/用途 |
-| --- | --- |
-| `ALIYUN_PROD_RDS_INSTANCE_ID` | 与 `/etc/joysong/prod/rds-binding.env` 和应用 `DB_URL` 同时校验的 Prod RDS 实例 ID |
-
-所有值都不得含凭据。OIDC provider 固定使用 issuer `https://token.actions.githubusercontent.com` 和 audience/client ID `github-actions`。Role 信任策略中的 `sub` 必须来自当前仓库 OIDC token 的实际值并绑定精确 Environment；仓库创建、转移或重命名后重新核对，不要照抄一个可能已过期的 subject 字符串。
-
-### 12.3 Repository Secrets（仅 UAT Android）
-
-| Secret | 用途 |
-| --- | --- |
-| `ANDROID_UAT_KEYSTORE_BASE64` | UAT keystore 的 base64 |
-| `ANDROID_UAT_STORE_PASSWORD` | UAT store 密码 |
-| `ANDROID_UAT_KEY_ALIAS` | UAT alias |
-| `ANDROID_UAT_KEY_PASSWORD` | UAT key 密码 |
-
-UAT APK 构建 job 不进入 `uat` Environment，因此这四项当前必须放 Repository Secrets。仓库访问权限应限制到最小；不得复用 Prod 证书或密码。
-
-### 12.4 `production` Environment Secrets
-
-| Secret | 用途 |
-| --- | --- |
-| `ANDROID_PROD_KEYSTORE_BASE64` | Prod keystore 的 base64 |
-| `ANDROID_PROD_STORE_PASSWORD` | Prod store 密码 |
-| `ANDROID_PROD_KEY_ALIAS` | Prod alias |
-| `ANDROID_PROD_KEY_PASSWORD` | Prod key 密码 |
-
-Prod 构建 job 明确进入 `production` Environment，必须等审批通过后才能读取这些秘密。阿里云部署不得配置长期 `ALIYUN_ACCESS_KEY_ID` / `ALIYUN_ACCESS_KEY_SECRET`；OIDC 失败时停止发布，不能降级到仓库长期密钥。
-
-## 13. Prod 部署开关
-
-Prod 必须同时满足：
+### 10.1 Bootstrap 接口
 
 ```text
-GitHub variable: PROD_DEPLOY_ENABLED=true
-ECS sentinel: /etc/joysong/prod/DEPLOY_ENABLED
+bootstrap-uat-host.sh preflight
+bootstrap-uat-host.sh apply <source-dir> <secrets-dir> <runner-archive> <runner-version> <runner-sha256>
 ```
 
-哨兵由 root 创建，普通部署用户无写权限。缺少任一条件、稳定 tag 不是已验收 UAT 的同一 commit、RDS 备份未完成或支付阻断项未解除时，Prod 工作流必须在切换版本前失败。
+`preflight` 是严格只读的 fresh-host 检查。`apply` 固定安装 OpenJDK 17、Nginx、MySQL 8、Python 3、curl、unzip、sudo、rsync、iproute2，以及仓库 `systemd/joysong-demo.service` 和 `nginx/joysong-public.conf`。第二次执行只允许复核完全一致的状态；已有未知目标、敏感配置或模板摘要漂移、Runner 不一致均 fail closed。
 
-## 14. 配置变更维护规则
+### 10.2 Runner 固定值
 
-新增、删除或修改任一环境变量时，同一 Pull Request 必须：
+| 项目 | 固定值/约束 |
+| --- | --- |
+| scope | 当前 Private 仓库专用 |
+| 用户 | `joysong-gh-runner`，nologin，非 root |
+| 版本/平台 | 官方 Linux x64 `v2.337.0` |
+| archive SHA-256 | `70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613` |
+| 标签 | 以 `--no-default-labels` 注册，只保留 `joysong-uat-deploy` |
+| 应用组 | 不加入 `joysong-demo`、`www-data` 或其他应用组 |
+| 云凭据 | 无 |
+| 应用秘密 | 无，且不能读 `/etc/joysong-demo/joysong.env` |
+| sudo | 仅 `/usr/local/sbin/joysong-uat-deploy`，`NOSETENV`、固定 `PATH` |
+| 当前主机 OS | 已验证 Ubuntu 24.04.4 LTS / x86_64 / systemd 255 |
+| 兼容层 | 无；禁止安装 CentOS/GLIBC side-by-side 兼容层 |
+| deploy job | 永久纯 shell、零 `uses:`；不得启动内置 Node 20/24 Action runtime |
+| online 门禁 | Listener `2.337.0`、service active、GitHub Runner API `online` |
 
-1. 更新实际 `application*.yml` 或 Flutter 配置绑定。
-2. 更新相关启动/部署校验和测试。
-3. 更新本配置参考中的用途、敏感性和环境要求。
-4. 若改变发布或验收行为，同时更新 `README.md`。
+Runner 注册 token 是一次性接入材料，只能位于受控 `<secrets-dir>/runner-registration-token`，由 root 读取并在注册成功后删除。不得提交、写入 workflow、保存到 Issue、通过 argv 传入或长期记录在 shell history。
 
-不得通过把真实值写进示例文件来“修复”缺失配置。
+## 11. GitHub Actions 配置
+
+### 11.1 仓库与分支
+
+- 仓库必须为 Private。
+- 默认/受保护目标分支为 `master`。
+- 必需检查名固定为 `Required quality gates`。
+- UAT tag 格式固定为 `vX.Y.Z-uat.N`。
+- 部署并发组固定为 `uat-deployment`，活动部署不取消。
+
+### 11.2 job 权限
+
+| job | 最小权限 |
+| --- | --- |
+| hosted preflight | `actions: read`、`contents: read` |
+| hosted build/package | `contents: read` |
+| ECS deploy | `actions: read`、`contents: read` |
+| hosted publish | `actions: read`、`contents: write`、`issues: write` |
+
+Self-hosted deploy job 不得获得 `contents: write`、`issues: write`、OIDC `id-token: write` 或云 AccessKey。
+该 job 还必须保持零 `uses:`；下载本次 Artifact、校验和调用固定入口全部使用仓库中受校验的纯 shell 契约。
+
+### 11.3 当前不需要的旧配置
+
+以下旧方案键不属于当前 UAT 主路径，不应成为 UAT tag workflow 的必需输入：
+
+- `ALIYUN_OIDC_PROVIDER_ARN`；
+- `ALIYUN_OIDC_ROLE_ARN`；
+- `ALIYUN_RELEASE_BUCKET` / `ALIYUN_RELEASE_PREFIX`；
+- `ALIYUN_CLOUD_ASSISTANT_COMMAND_ID`；
+- UAT Android/iOS 签名 secrets。
+
+第三方 Action 的 `uses` 必须固定到完整 commit SHA。Runner label、固定路径、tag 格式和并发组属于仓库内非秘密配置；真实 Token、凭据和环境文件不属于 GitHub 配置。
+
+若仓库中暂时保留这些值供未来 Prod 设计或旧资源只读盘点，当前 UAT workflow 不得读取或使用它们。
+
+## 12. 发布 identity
+
+| 字段 | 约束 |
+| --- | --- |
+| `schemaVersion` | 固定支持版本 |
+| `environment` | `uat` |
+| `tag` | `vX.Y.Z-uat.N` |
+| `commit` | 40 位小写 Git SHA |
+| `runId` / `buildNumber` | 正整数，并与当前 workflow run 绑定 |
+| `databaseMigrationsSha256` | 64 位小写摘要，必须与当前 JAR 相同 |
+| Backend/Admin hashes | 覆盖部署的精确文件和树 |
+
+`SHA256SUMS` 必须覆盖包内精确证据集合；外层 `.tar.gz.sha256` 绑定 Runner 下载的单一部署包。主机端必须重新计算，不能只信任 workflow 输入。
+
+## 13. 更新规则
+
+新增、删除或修改环境变量、Runner 权限、目录、manifest 字段或部署参数时，同一 PR 必须更新：
+
+1. 实际 workflow、脚本或应用绑定；
+2. 对应 validator 和单元测试；
+3. 本配置字典；
+4. 若行为变化，同时更新权威部署指南。
+
+不得通过把真实值写进仓库来修复缺失配置。

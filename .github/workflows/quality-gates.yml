@@ -2,6 +2,7 @@ name: Quality gates
 
 on:
   pull_request:
+    branches: [master]
   push:
     branches: [master]
   workflow_dispatch:
@@ -19,7 +20,6 @@ jobs:
     outputs:
       backend: ${{ steps.scope.outputs.backend }}
       admin: ${{ steps.scope.outputs.admin }}
-      flutter: ${{ steps.scope.outputs.flutter }}
       infrastructure: ${{ steps.scope.outputs.infrastructure }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -46,10 +46,9 @@ jobs:
           fi
           match() { grep -Eq "$1" <<<"$changed" && printf true || printf false; }
           {
-            echo "backend=$(match '^(joysong-server/|build.gradle|settings.gradle)')"
+            echo "backend=$(match '^joysong-server/(src/|build\.gradle\.kts$|settings\.gradle\.kts$|gradle/|gradlew(\.bat)?$|gradle\.properties$)')"
             echo "admin=$(match '^joysong-admin/')"
-            echo "flutter=$(match '^joysong-flutter/')"
-            echo "infrastructure=$(match '^(\.github/|joysong-server/deploy/|docs/)')"
+            echo "infrastructure=$(match '^(\.github/|joysong-server/deploy/|docs/guide/deployment/|design/ALIYUN_CICD_DEPLOYMENT\.puml$)')"
           } >>"$GITHUB_OUTPUT"
 
   backend:
@@ -129,84 +128,13 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: joysong-admin/package-lock.json
-      - name: Lint, test and build admin
+      - name: Lint, typecheck, test and build admin
         working-directory: joysong-admin
         run: |
           npm ci
           npm run lint
-          npm test
+          npm test -- --maxWorkers=1 --fileParallelism=false
           npm run build
-
-  flutter:
-    needs: changes
-    if: needs.changes.outputs.flutter == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          fetch-depth: 0
-      - uses: subosito/flutter-action@e938fdf56512cc96ef2f93601a5a40bde3801046 # v2.19.0
-        with:
-          flutter-version: '3.44.8'
-          cache: true
-      - name: Analyze and test Flutter
-        working-directory: joysong-flutter
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PUSH_BASE_SHA: ${{ github.event.before }}
-          # First commit before incremental Dart-format enforcement.
-          FORMAT_BASE_SHA: 996e686555e7740ed383e401defb2c1961affad7
-        run: |
-          set -Eeuo pipefail
-          flutter pub get
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            git merge-base --is-ancestor "$FORMAT_BASE_SHA" "$GITHUB_SHA"
-            base="$FORMAT_BASE_SHA"
-          elif [[ "$EVENT_NAME" == "pull_request" ]]; then
-            base="$PR_BASE_SHA"
-          else
-            base="$PUSH_BASE_SHA"
-          fi
-          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
-            base="$FORMAT_BASE_SHA"
-          fi
-          mapfile -t dart_files < <(
-            git diff --name-only --diff-filter=ACMR "$base" "$GITHUB_SHA" -- . |
-              sed -n 's#^joysong-flutter/\(.*\.dart\)$#\1#p'
-          )
-          if ((${#dart_files[@]} > 0)); then
-            dart format --output=none --set-exit-if-changed "${dart_files[@]}"
-          fi
-          flutter analyze
-          flutter test
-
-  ios-unsigned:
-    needs: changes
-    if: needs.changes.outputs.flutter == 'true'
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: subosito/flutter-action@e938fdf56512cc96ef2f93601a5a40bde3801046 # v2.19.0
-        with:
-          flutter-version: '3.44.8'
-          cache: true
-      - name: Compile unsigned iOS UAT app
-        working-directory: joysong-flutter
-        env:
-          API_BASE_URL: ${{ vars.UAT_API_BASE_URL }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          [[ "$API_BASE_URL" =~ ^https://[^/[:space:]]+(/.*)?$ ]] || {
-            echo "UAT_API_BASE_URL must be an absolute HTTPS URL" >&2
-            exit 1
-          }
-          flutter pub get
-          flutter build ios --no-codesign \
-            --dart-define=APP_ENV=uat \
-            --dart-define=API_BASE_URL="$API_BASE_URL"
 
   infrastructure:
     needs: changes
@@ -214,50 +142,109 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Validate deployment assets
+      - name: Parse workflow YAML
+        shell: bash
+        run: |
+          ruby -e 'require "yaml"; (Dir[".github/workflows/*.{yml,yaml}"] + Dir[".github/ISSUE_TEMPLATE/*.{yml,yaml}"]).sort.each { |path| abort("invalid YAML: #{path}") unless YAML.parse(File.read(path)) }'
+      - name: Validate deployment contracts and Python syntax
+        run: python3 joysong-server/deploy/ci/validate-workflows.py
+      - name: Run deployment unit tests
+        run: python3 -m unittest discover -s joysong-server/deploy/tests -p 'test_*.py'
+      - name: Validate and lint deployment shell
         shell: bash
         run: |
           set -Eeuo pipefail
-          python3 joysong-server/deploy/ci/validate-workflows.py
-          find joysong-server/deploy -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
-          command -v shellcheck >/dev/null
           mapfile -d '' shell_files < <(find joysong-server/deploy -type f -name '*.sh' -print0)
-          shell_files+=(joysong-server/deploy/host/joysong-release-dispatch)
+          for extensionless in \
+            joysong-server/deploy/host/joysong-release-dispatch \
+            joysong-server/deploy/host/joysong-uat-deploy; do
+            [[ ! -f "$extensionless" ]] || shell_files+=("$extensionless")
+          done
+          for shell_file in "${shell_files[@]}"; do
+            bash -n "$shell_file"
+          done
+          command -v shellcheck >/dev/null
           shellcheck -x "${shell_files[@]}"
-          bash joysong-server/deploy/ci/run-actionlint.sh
-      - name: Validate PowerShell syntax
-        shell: pwsh
+      - name: Run pinned actionlint
+        run: bash joysong-server/deploy/ci/run-actionlint.sh
+
+  security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Block high and critical vulnerabilities, secrets and misconfiguration
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '0'
+          format: json
+          output: quality-scan-report.json
+          version: v0.74.0
+      - name: Generate CycloneDX SBOM
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: cyclonedx
+          output: quality-sbom.cdx.json
+          exit-code: '0'
+          version: v0.74.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: quality-security-${{ github.sha }}
+          path: |
+            quality-scan-report.json
+            quality-sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Enforce empty high-severity security report
+        shell: bash
         run: |
-          $failed = $false
-          Get-ChildItem joysong-server/deploy -Recurse -File -Filter '*.ps1' | ForEach-Object {
-            $tokens = $null
-            $parseErrors = $null
-            [void][System.Management.Automation.Language.Parser]::ParseFile(
-              $_.FullName,
-              [ref]$tokens,
-              [ref]$parseErrors
-            )
-            if ($parseErrors.Count -gt 0) {
-              $failed = $true
-              $parseErrors | ForEach-Object {
-                Write-Error "$($_.Extent.File):$($_.Extent.StartLineNumber): $($_.Message)" -ErrorAction Continue
-              }
-            }
-          }
-          if ($failed) { exit 1 }
+          set -Eeuo pipefail
+          findings="$(jq '[.Results[]? | ((.Vulnerabilities // [])[]?, (.Misconfigurations // [])[]?, (.Secrets // [])[]?)] | length' quality-scan-report.json)"
+          [[ "$findings" =~ ^[0-9]+$ ]]
+          if ((findings > 0)); then
+            jq -r '.Results[]? as $result | ((.Vulnerabilities // [])[]?, (.Misconfigurations // [])[]?, (.Secrets // [])[]?) | [$result.Target, (.VulnerabilityID // .ID // .RuleID // "unknown"), (.Severity // "UNKNOWN")] | @tsv' quality-scan-report.json
+            echo "Security gate found $findings high/critical vulnerability, secret or misconfiguration result(s)." >&2
+            exit 1
+          fi
 
   quality-gates:
     name: Required quality gates
     if: always()
-    needs: [changes, backend, backend-mysql, admin, flutter, ios-unsigned, infrastructure]
+    needs: [changes, backend, backend-mysql, admin, infrastructure, security]
     runs-on: ubuntu-latest
     steps:
       - name: Require every selected check to pass
         env:
           RESULTS: ${{ toJSON(needs) }}
+        shell: bash
         run: |
-          if jq -e 'to_entries | any(.value.result == "failure" or .value.result == "cancelled")' <<<"$RESULTS"; then
-            echo "At least one selected quality gate failed."
-            exit 1
-          fi
+          set -Eeuo pipefail
+          jq -e '
+            .changes.result == "success" and
+            .security.result == "success" and
+            (
+              (.changes.outputs.backend == "true" and
+               .backend.result == "success" and
+               ."backend-mysql".result == "success") or
+              (.changes.outputs.backend != "true" and
+               .backend.result == "skipped" and
+               ."backend-mysql".result == "skipped")
+            ) and
+            (
+              (.changes.outputs.admin == "true" and .admin.result == "success") or
+              (.changes.outputs.admin != "true" and .admin.result == "skipped")
+            ) and
+            (
+              (.changes.outputs.infrastructure == "true" and .infrastructure.result == "success") or
+              (.changes.outputs.infrastructure != "true" and .infrastructure.result == "skipped")
+            )
+          ' <<<"$RESULTS" >/dev/null
           echo "All selected quality gates passed."

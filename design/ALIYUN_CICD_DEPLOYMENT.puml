@@ -1,5 +1,5 @@
 @startuml
-title JoySong GitHub CI/CD and Alibaba Cloud UAT
+title JoySong Ubuntu 24.04 UAT Full-chain Deployment
 
 skinparam componentStyle rectangle
 skinparam shadowing false
@@ -8,68 +8,98 @@ actor Developer
 actor "UAT Reviewer" as Reviewer
 
 rectangle GitHub {
-  component "Pull Request\nquality gates" as CI
-  component "UAT tag\nDraft Release" as Release
-  component "Acceptance Issue" as Issue
-  component "Promote / Rollback" as Control
+  component "PR / master\nRequired quality gates\nGitHub-hosted Runner" as Quality
+  component "UAT tag build\nBackend + Admin\nGitHub-hosted Runner" as Build
+  artifact "Actions Artifact\njoysong-uat-<tag>.tar.gz\nmanifest / SHA / SBOM / scan" as Artifact
+  component "Publish result\nGitHub-hosted job" as Publish
+  artifact "Private Draft Release" as Draft
+  component "Acceptance Issue\nno mobile checklist" as Issue
 }
 
 cloud "Alibaba Cloud" {
-  component "OIDC RAM Role" as OIDC
-  storage "Private release OSS" as ReleaseOss
-  component "Cloud Assistant" as Assistant
-
-  node "Existing ECS\n(UAT Candidate -> UAT)" as ECS {
-    component "existing joysong-demo\n(frozen only at final cutover)" as OldBackend
-    component "root dispatcher" as Dispatcher
-    component "joysong-deploy" as DeployUser
-    component "Nginx\nHTTPS / persistent maintenance" as Nginx
-    component "joysong-uat\nSpring Boot" as Backend
-    folder "releases/<tag>\ncurrent / previous" as Releases
-    folder "root-only backup identity\nconfig / DB / data" as Backups
-    file "persistent transaction marker" as Marker
-    database "Isolated MySQL\nmyapp_worktree_*" as UatDb
-    folder "Persistent public/private files" as Files
+  node "Fresh ECS\ni-bp19abm7697mvhl0xewu\nUbuntu 24.04.4 / x86_64 / systemd 255" as ECS {
+    component "Ubuntu bootstrap\npreflight (read-only) / apply" as Bootstrap
+    component "Dedicated Runner v2.337.0\njoysong-gh-runner\nlabel: joysong-uat-deploy only" as Runner
+    folder "/var/lib/joysong-deploy\nincoming / state / backups" as DeployData
+    component "root-owned fixed entry\n/usr/local/sbin/joysong-uat-deploy" as RootDeploy
+    folder "Backend releases\n/opt/joysong-demo\ncurrent / previous" as BackendReleases
+    folder "Admin releases\n/var/www/joysong-demo\ncurrent / previous" as AdminReleases
+    component "joysong-demo.service\ndemo / 127.0.0.1:8080" as Service
+    component "Nginx\nwww-data\n/etc/nginx/conf.d/joysong-public.conf" as Nginx
+    file "/etc/joysong-demo/host-contract\ntwo template SHA-256 values" as HostContract
+    database "Local MySQL 8\nmyapp_worktree_uat\nfresh: empty\nhealthy: B33 + V34...V40" as Database
+    folder "uploads / private / staging\nRunner isolated" as PersistentData
   }
+
+  storage "Existing business Buckets\nACL and objects unchanged" as BusinessBuckets
 }
 
-Developer --> CI
-CI --> Release : full gates pass
-Release --> OIDC : short-lived credentials
-OIDC --> ReleaseOss : upload immutable bundle
-OIDC --> Assistant : RunCommand on tagged ECS
-Assistant --> Dispatcher : env + release + manifest SHA
-Dispatcher --> DeployUser : fixed allowlisted operation
-DeployUser --> ReleaseOss : short-lived download
-DeployUser --> Releases : verify and stage
-Dispatcher --> Backups : capture before mutation
-Dispatcher --> Marker : fail closed during switch
-Marker --> Nginx : 503 until verified
-Marker --> Backend : block reboot/startup
-OldBackend --> UatDb : current writer before cutover
-Dispatcher --> OldBackend : bind identity, freeze, verify stopped
-Releases --> Backend : atomic current switch
-Releases --> Nginx : Admin static root
-Backend --> UatDb
-Backend --> Files
-Nginx --> Backend
+Developer --> Quality : pull request / master push
+Quality --> Build : unused UAT tag\npoints to passed master commit
+Build --> Artifact : immutable package
+Artifact --> Runner : download current run only
+Runner --> DeployData : write incoming/<run-id>
+Runner --> RootDeploy : sudo fixed argv only
 
-Release --> Issue : create after technical checks
-Reviewer --> Issue : record business acceptance
-Issue --> Control : accepted or rejected
-Control --> Release : Draft -> Pre-release
-Control --> Dispatcher : manual rollback
+Bootstrap --> Runner : verified archive + one-time token
+Bootstrap --> RootDeploy : install script, verifier, sudoers
+Bootstrap --> Service : install unit; keep inactive/disabled
+Bootstrap --> Nginx : install template
+Bootstrap --> HostContract : bind systemd + Nginx templates
+Bootstrap --> Database : create empty database + least privilege accounts
+Bootstrap --> DeployData : create isolated directories
 
-note right of ECS
-  UAT and future Prod use isolated
-  users, ports, directories, secrets,
-  databases and release links.
+RootDeploy --> DeployData : lock, transaction marker,\nverified backup and identity
+RootDeploy --> BackendReleases : verify and install immutable release
+RootDeploy --> AdminReleases : verify and install immutable release
+RootDeploy --> Service : start / stop / enable
+Service --> Database : fresh migration or unchanged existing history
+Service --> PersistentData
+Service --> BusinessBuckets : application identity only
+Nginx --> Service : 127.0.0.1:8080 upstream
+Nginx --> AdminReleases : current root
+
+RootDeploy --> BackendReleases : fresh current or atomic existing switch
+RootDeploy --> AdminReleases : switch only after Backend health
+RootDeploy --> Service : health, MainPID and JAR verification
+
+RootDeploy --> Runner : exit status and non-secret evidence only
+Runner --> Publish : successful deploy job unlocks publish
+Publish --> Draft
+Publish --> Issue
+Reviewer --> Issue : later public and business acceptance
+
+note right of Bootstrap
+  preflight expects a blank host and is read-only.
+  apply consumes exactly three root-only secret files.
+  Re-apply only verifies an identical installation.
+  Unknown or drifting state fails closed.
 end note
 
-note bottom of Control
-  Prod remains disabled until both
-  GitHub variable and root sentinel
-  are enabled and all blockers clear.
+note right of Runner
+  Registered with --no-default-labels.
+  No cloud or application secrets.
+  Cannot read private/staging/state/backups.
+  PR workflows never use this Runner.
+end note
+
+note bottom of RootDeploy
+  fresh: no previous; empty Flyway may become B33 + V34...V40.
+  existing: migration digest must match; max downtime is 180 seconds.
+  Any unexpected Flyway change keeps the service stopped
+  with the transaction marker for manual recovery.
+end note
+
+note bottom of Issue
+  Deployment result:
+  UAT Candidate 已部署，公网未 Ready
+  Full-chain completion additionally requires
+  ADMIN_PASSWORD removal and restart verification.
+end note
+
+note bottom of BusinessBuckets
+  Release OSS, Alibaba Cloud OIDC and Cloud Assistant
+  are not part of the current UAT path.
 end note
 
 @enduml
