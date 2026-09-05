@@ -193,7 +193,7 @@ jobs:
           exit-code: '1'
           format: json
           output: uat-scan-report.json
-          trivy-version: v0.74.0
+          version: v0.74.0
       - name: Generate CycloneDX SBOM
         uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
         with:
@@ -202,7 +202,7 @@ jobs:
           format: cyclonedx
           output: uat-sbom.cdx.json
           exit-code: '0'
-          trivy-version: v0.74.0
+          version: v0.74.0
       - id: package
         name: Assemble immutable UAT bundle
         shell: bash
