@@ -14,9 +14,17 @@ class WorktreeTestDatabaseTest {
     }
 
     @Test
-    fun `database rejects a directory outside the destructive-safe namespace`() {
+    fun `database adds the destructive-safe worktree namespace`() {
+        assertEquals(
+            "myapp_worktree_uat_fast_release",
+            WorktreeTestDatabase.databaseName("uat-fast-release"),
+        )
+    }
+
+    @Test
+    fun `database rejects an empty normalized worktree name`() {
         assertThrows(IllegalArgumentException::class.java) {
-            WorktreeTestDatabase.databaseName("upload_performance_fix")
+            WorktreeTestDatabase.databaseName("---")
         }
     }
 }

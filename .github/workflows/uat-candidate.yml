@@ -7,6 +7,14 @@ on:
 
 permissions: {}
 
+env:
+  LC_ALL: C
+  UAT_MAX_RUN_ID: '9223372036854775807'
+  UAT_MAX_BUNDLE_BYTES: '1073741824'
+  UAT_MAX_ARTIFACT_ZIP_BYTES: '1140850688'
+  UAT_MAX_SIDECAR_BYTES: '4096'
+  UAT_MIN_FREE_AFTER_EXTRACT_BYTES: '67108864'
+
 concurrency:
   group: uat-deployment
   cancel-in-progress: false
@@ -15,436 +23,588 @@ jobs:
   preflight:
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
-      checks: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - name: Validate immutable candidate identity
+      - name: Validate immutable candidate and master quality gates
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         shell: bash
         run: |
           set -Eeuo pipefail
+          [[ "$GITHUB_RUN_ATTEMPT" == "1" ]] || {
+            echo "UAT workflow reruns are forbidden; create a new tag." >&2
+            exit 1
+          }
+          [[ "$GITHUB_REF_TYPE" == "tag" ]]
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-uat\.(0|[1-9][0-9]*)$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,18}$ ]]
+          [[ "${#GITHUB_RUN_ID}" -lt 19 || "$GITHUB_RUN_ID" < "$UAT_MAX_RUN_ID" || "$GITHUB_RUN_ID" == "$UAT_MAX_RUN_ID" ]]
           [[ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .visibility)" == "private" ]] || {
-            echo "UAT releases contain private delivery artifacts and require a private GitHub repository" >&2
+            echo "UAT delivery artifacts require a private repository." >&2
             exit 1
           }
-          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-uat\.[0-9]+$ ]]
-          git fetch origin master --no-tags
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/master
-          quality_conclusion="$(gh api \
-            -H 'Accept: application/vnd.github+json' \
-            "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
-            --jq '[.check_runs[] | select(.name == "Required quality gates")] | sort_by(.completed_at) | last | .conclusion // ""')"
-          [[ "$quality_conclusion" == "success" ]] || {
-            echo "The exact candidate commit lacks a successful Required quality gates check" >&2
+
+          current_run="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")"
+          jq -e --arg tag "$TAG" --arg sha "$GITHUB_SHA" '
+            .event == "push" and
+            .head_branch == $tag and
+            .head_sha == $sha
+          ' <<<"$current_run" >/dev/null || {
+            echo "The current run is not bound to the expected immutable tag." >&2
             exit 1
           }
-          mapfile -t pending_tags < <(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq \
-            '.[] | select(.draft == true) | .tag_name')
-          latest_pending="$(printf '%s\n' "$TAG" "${pending_tags[@]}" |
-            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-uat\.[0-9]+$' | sort -V | tail -n 1)"
-          [[ "$latest_pending" == "$TAG" ]] || {
-            echo "A newer pending UAT candidate already exists: $latest_pending" >&2
+          tag_run_pages="$RUNNER_TEMP/uat-candidate-runs.jsonl"
+          gh api --paginate \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/uat-candidate.yml/runs?event=push&per_page=100" \
+            >"$tag_run_pages"
+          historical_tag_runs="$(jq -s --arg tag "$TAG" --arg current "$GITHUB_RUN_ID" '
+            [
+              .[].workflow_runs[]
+              | select(.head_branch == $tag and (.id | tostring) != $current)
+            ]
+            | length
+          ' "$tag_run_pages")"
+          [[ "$historical_tag_runs" == "0" ]] || {
+            echo "This UAT tag has historical workflow runs and must never be reused." >&2
             exit 1
           }
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "A GitHub Release already exists for immutable tag $TAG" >&2
+
+          git fetch --no-tags origin \
+            "+refs/heads/master:refs/remotes/origin/master"
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/master || {
+            echo "The tag commit is not contained in origin/master." >&2
+            exit 1
+          }
+
+          gate_runs="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/quality-gates.yml/runs?branch=master&event=push&head_sha=$GITHUB_SHA&status=success&per_page=100")"
+          gate_run_id="$(jq -r --arg sha "$GITHUB_SHA" '
+            [
+              .workflow_runs[]
+              | select(
+                  .head_sha == $sha and
+                  .head_branch == "master" and
+                  .event == "push" and
+                  .status == "completed" and
+                  .conclusion == "success"
+                )
+            ]
+            | sort_by(.updated_at)
+            | last
+            | .id // empty
+          ' <<<"$gate_runs")"
+          [[ "$gate_run_id" =~ ^[1-9][0-9]*$ ]] || {
+            echo "No successful master push quality-gates run exists for $GITHUB_SHA." >&2
+            exit 1
+          }
+          required_jobs="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$gate_run_id/jobs?filter=latest&per_page=100" \
+            --jq '[.jobs[] | select(
+              .name == "Required quality gates" and
+              .status == "completed" and
+              .conclusion == "success"
+            )] | length')"
+          [[ "$required_jobs" == "1" ]] || {
+            echo "The master push run lacks one successful Required quality gates job." >&2
+            exit 1
+          }
+
+          release_error="$RUNNER_TEMP/existing-release-error"
+          if release_metadata="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>"$release_error")"; then
+            jq -e '.draft == true' <<<"$release_metadata" >/dev/null || {
+              echo "An existing non-draft release makes this tag immutable." >&2
+              exit 1
+            }
+          elif ! grep -Fq "(HTTP 404)" "$release_error"; then
+            cat "$release_error" >&2
             exit 1
           fi
 
-  server-admin:
+          {
+            echo "Validated master quality run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$gate_run_id"
+            echo "Validated candidate commit: $GITHUB_SHA"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  build:
     needs: preflight
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      artifact_name: ${{ steps.package.outputs.artifact_name }}
+      bundle_name: ${{ steps.package.outputs.bundle_name }}
+      bundle_sha256: ${{ steps.package.outputs.bundle_sha256 }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          path: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}
       - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
-          cache-dependency-path: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}/joysong-server/gradle/wrapper/gradle-wrapper.properties
+          cache-dependency-path: joysong-server/gradle/wrapper/gradle-wrapper.properties
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}/joysong-admin/package-lock.json
-      - name: Test and build backend
-        working-directory: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}/joysong-server
+          cache-dependency-path: joysong-admin/package-lock.json
+      - name: Build backend
+        working-directory: joysong-server
+        shell: bash
         run: |
           set -Eeuo pipefail
-          repository_root="$(git rev-parse --show-toplevel)"
-          worktree_id="$(basename "$repository_root")"
-          [[ "$worktree_id" == worktree_* ]]
-          database_name="myapp_${worktree_id}"
-          echo "Migration/test database host: Testcontainers isolated MySQL"
-          echo "Migration/test database name: $database_name"
           chmod +x gradlew
-          ./gradlew test mysqlIntegrationTest bootJar --no-daemon
+          ./gradlew bootJar --no-daemon
+          mapfile -t jars < <(
+            find build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-plain.jar' -print
+          )
+          ((${#jars[@]} == 1)) || {
+            echo "Expected exactly one executable backend JAR." >&2
+            exit 1
+          }
           mkdir -p "$RUNNER_TEMP/release-input"
-          cp build/libs/*.jar "$RUNNER_TEMP/release-input/server.jar"
-      - name: Test and build admin
-        working-directory: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}/joysong-admin
+          install -m 0644 "${jars[0]}" "$RUNNER_TEMP/release-input/joysong-server.jar"
+      - name: Build admin
+        working-directory: joysong-admin
         run: |
           npm ci
-          npm run lint
-          npm test
           npm run build
-          cp -R dist "$RUNNER_TEMP/release-input/admin"
-      - name: Block high and critical vulnerabilities or secrets
+      - name: Block high and critical vulnerabilities, secrets and misconfiguration
         uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
         with:
           scan-type: fs
-          scan-ref: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}
+          scan-ref: .
           scanners: vuln,secret,misconfig
           severity: HIGH,CRITICAL
           ignore-unfixed: false
           exit-code: '1'
           format: json
-          output: trivy-results.json
+          output: uat-scan-report.json
           trivy-version: v0.74.0
       - name: Generate CycloneDX SBOM
         uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
         with:
           scan-type: fs
-          scan-ref: worktree_ci_${{ github.run_id }}_${{ github.run_attempt }}
+          scan-ref: .
           format: cyclonedx
-          output: sbom.cdx.json
+          output: uat-sbom.cdx.json
           exit-code: '0'
           trivy-version: v0.74.0
-      - name: Stage scan evidence and SBOM
-        run: |
-          cp sbom.cdx.json "$RUNNER_TEMP/release-input/sbom.cdx.json"
-          cp trivy-results.json "$RUNNER_TEMP/release-input/trivy-results.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: uat-server-admin
-          path: ${{ runner.temp }}/release-input
-          if-no-files-found: error
-          retention-days: 30
-
-  android:
-    needs: preflight
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: subosito/flutter-action@e938fdf56512cc96ef2f93601a5a40bde3801046 # v2.19.0
-        with:
-          flutter-version: '3.44.8'
-          cache: true
-      - name: Inject isolated UAT signing material
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_UAT_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_UAT_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_UAT_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_UAT_KEY_PASSWORD }}
+      - id: package
+        name: Assemble immutable UAT bundle
         shell: bash
         run: |
           set -Eeuo pipefail
-          for value in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
-            [[ -n "${!value}" ]] || { echo "Missing UAT signing secret: $value" >&2; exit 1; }
-          done
-          keystore="$RUNNER_TEMP/joysong-uat.jks"
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode >"$keystore"
-          chmod 0600 "$keystore"
-          {
-            printf 'storeFile=%s\n' "$keystore"
-            printf 'storePassword=%s\n' "$STORE_PASSWORD"
-            printf 'keyAlias=%s\n' "$KEY_ALIAS"
-            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
-          } >joysong-flutter/android/key.uat.properties
-          chmod 0600 joysong-flutter/android/key.uat.properties
-      - name: Analyze, test and build signed universal APK
-        working-directory: joysong-flutter
-        env:
-          API_BASE_URL: ${{ vars.UAT_API_BASE_URL }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          [[ "$API_BASE_URL" == "https://api.joyingsong.net" ||
-             "$API_BASE_URL" == "https://api-uat.joyingsong.net" ]] || {
-            echo "UAT_API_BASE_URL must be an approved exact HTTPS origin" >&2
-            exit 1
-          }
-          flutter pub get
-          dart format --output=none --set-exit-if-changed lib test
-          flutter analyze
-          flutter test
-          flutter build apk --release --flavor uat \
-            --build-name="${GITHUB_REF_NAME#v}" \
-            --build-number="$GITHUB_RUN_NUMBER" \
-            --dart-define=APP_ENV=uat \
-            --dart-define=API_BASE_URL="$API_BASE_URL"
-          test -f build/app/outputs/flutter-apk/app-uat-release.apk
-      - name: Verify UAT APK identity, metadata and signing certificate
-        working-directory: joysong-flutter
-        env:
-          API_BASE_URL: ${{ vars.UAT_API_BASE_URL }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_UAT_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_UAT_KEY_ALIAS }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          export LC_ALL=C
-          apk=build/app/outputs/flutter-apk/app-uat-release.apk
-          [[ "$(apkanalyzer manifest application-id "$apk" | xargs)" == "com.joysong.app.uat" ]]
-          apkanalyzer manifest print "$apk" >"$RUNNER_TEMP/uat-manifest.xml"
-          python3 - "$RUNNER_TEMP/uat-manifest.xml" uat "$API_BASE_URL" joysong-uat \
-            "${GITHUB_REF_NAME#v}" "$GITHUB_RUN_NUMBER" <<'PY'
-          import sys
-          import xml.etree.ElementTree as ET
-
-          manifest_path, expected_env, expected_url, expected_scheme, expected_name, expected_code = sys.argv[1:]
-          android = "{http://schemas.android.com/apk/res/android}"
-          root = ET.parse(manifest_path).getroot()
-          if root.get(android + "versionName") != expected_name:
-              raise SystemExit("APK versionName mismatch")
-          if root.get(android + "versionCode") != expected_code:
-              raise SystemExit("APK versionCode mismatch")
-          application = root.find("application")
-          if application is None:
-              raise SystemExit("APK manifest lacks application")
-          metadata = {
-              item.get(android + "name"): item.get(android + "value")
-              for item in application.findall("meta-data")
-          }
-          expected = {
-              "com.joysong.app.APP_ENV": expected_env,
-              "com.joysong.app.API_BASE_URL": expected_url,
-          }
-          for name, value in expected.items():
-              if metadata.get(name) != value:
-                  raise SystemExit(f"APK metadata mismatch: {name}")
-          schemes = {item.get(android + "scheme") for item in root.findall(".//data")}
-          if expected_scheme not in schemes:
-              raise SystemExit("APK deep-link scheme mismatch")
-          PY
-          apksigner verify --verbose --print-certs "$apk" >"$RUNNER_TEMP/uat-certificate.txt"
-          expected_fingerprint="$(keytool -list -v \
-            -keystore "$RUNNER_TEMP/joysong-uat.jks" \
-            -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" |
-            sed -n 's/^[[:space:]]*SHA256:[[:space:]]*//p' | head -n 1 |
-            tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
-          actual_fingerprint="$(sed -n \
-            's/^Signer #1 certificate SHA-256 digest:[[:space:]]*//p' \
-            "$RUNNER_TEMP/uat-certificate.txt" | head -n 1 |
-            tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
-          [[ "$expected_fingerprint" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$actual_fingerprint" == "$expected_fingerprint" ]] || {
-            echo "UAT APK signing certificate mismatch" >&2
-            exit 1
-          }
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: uat-android
-          path: joysong-flutter/build/app/outputs/flutter-apk/app-uat-release.apk
-          if-no-files-found: error
-          retention-days: 30
-      - name: Remove temporary UAT signing material
-        if: always()
-        shell: bash
-        run: |
-          rm -f joysong-flutter/android/key.uat.properties
-          rm -f "$RUNNER_TEMP/joysong-uat.jks"
-
-  ios-unsigned:
-    needs: preflight
-    runs-on: macos-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: subosito/flutter-action@e938fdf56512cc96ef2f93601a5a40bde3801046 # v2.19.0
-        with:
-          flutter-version: '3.44.8'
-          cache: true
-      - name: Compile unsigned iOS UAT app
-        working-directory: joysong-flutter
-        env:
-          API_BASE_URL: ${{ vars.UAT_API_BASE_URL }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          [[ "$API_BASE_URL" == "https://api.joyingsong.net" ||
-             "$API_BASE_URL" == "https://api-uat.joyingsong.net" ]] || {
-            echo "UAT_API_BASE_URL must be an approved exact HTTPS origin" >&2
-            exit 1
-          }
-          flutter pub get
-          flutter build ios --no-codesign \
-            --dart-define=APP_ENV=uat \
-            --dart-define=API_BASE_URL="$API_BASE_URL"
-
-  publish-deploy:
-    needs: [preflight, server-admin, android, ios-unsigned]
-    runs-on: ubuntu-latest
-    environment: uat
-    permissions:
-      contents: write
-      issues: write
-      id-token: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      ALIYUN_REGION: ${{ vars.ALIYUN_REGION }}
-      ALIYUN_ECS_INSTANCE_ID: ${{ vars.ALIYUN_ECS_INSTANCE_ID }}
-      RELEASE_BUCKET: ${{ vars.ALIYUN_RELEASE_BUCKET }}
-      RELEASE_PREFIX: ${{ vars.ALIYUN_RELEASE_PREFIX }}
-      UAT_API_BASE_URL: ${{ vars.UAT_API_BASE_URL }}
-      UAT_ADMIN_BASE_URL: ${{ vars.UAT_ADMIN_BASE_URL }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: uat-server-admin
-          path: input
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: uat-android
-          path: input
-      - name: Assemble immutable release
-        id: release
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          mkdir release
+          output="$RUNNER_TEMP/release"
+          bundle_name="joysong-uat-${GITHUB_REF_NAME}.tar.gz"
+          artifact_name="joysong-uat-${GITHUB_REF_NAME}"
           python3 joysong-server/deploy/ci/package-release.py \
-            --output release \
-            --environment uat \
+            --output "$output" \
             --tag "$GITHUB_REF_NAME" \
             --commit "$GITHUB_SHA" \
-            --build-number "$GITHUB_RUN_NUMBER" \
-            --api-base-url "$UAT_API_BASE_URL" \
-            --admin-base-url "$UAT_ADMIN_BASE_URL" \
-            --jar input/server.jar \
-            --admin-dir input/admin \
-            --apk input/app-uat-release.apk \
-            --sbom input/sbom.cdx.json \
-            --scan-report input/trivy-results.json
-          echo "manifest_sha=$(sha256sum release/manifest.json | awk '{print $1}')" >>"$GITHUB_OUTPUT"
-      - name: Scan assembled artifacts
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+            --run-id "$GITHUB_RUN_ID" \
+            --jar "$RUNNER_TEMP/release-input/joysong-server.jar" \
+            --admin-dir joysong-admin/dist \
+            --sbom uat-sbom.cdx.json \
+            --scan-report uat-scan-report.json
+          bundle="$output/$bundle_name"
+          sidecar="$bundle.sha256"
+          [[ -f "$bundle" && ! -L "$bundle" && -f "$sidecar" && ! -L "$sidecar" ]]
+          bundle_sha256="$(sha256sum "$bundle" | awk '{print $1}')"
+          [[ "$bundle_sha256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$(awk 'NF { print $1; exit }' "$sidecar")" == "$bundle_sha256" ]]
+          {
+            echo "artifact_name=$artifact_name"
+            echo "bundle_name=$bundle_name"
+            echo "bundle_sha256=$bundle_sha256"
+          } >>"$GITHUB_OUTPUT"
+          printf "Bundle SHA-256: %s\n" "$bundle_sha256" >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          scan-type: fs
-          scan-ref: release
-          scanners: vuln,secret
-          severity: HIGH,CRITICAL
-          ignore-unfixed: false
-          exit-code: '1'
-          trivy-version: v0.74.0
-      - name: Create private draft release
-        shell: bash
-        run: |
-          cat >"$RUNNER_TEMP/release-notes.md" <<EOF
-          UAT candidate built from commit \`$GITHUB_SHA\`.
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: |
+            ${{ runner.temp }}/release/${{ steps.package.outputs.bundle_name }}
+            ${{ runner.temp }}/release/${{ steps.package.outputs.bundle_name }}.sha256
+          if-no-files-found: error
+          retention-days: 30
 
-          This release remains private as a draft until technical deployment and manual acceptance complete.
-          EOF
-          gh release create "$GITHUB_REF_NAME" release/* \
-            --verify-tag --draft --title "JoySong $GITHUB_REF_NAME" \
-            --notes-file "$RUNNER_TEMP/release-notes.md"
-      - name: Acquire short-lived Alibaba Cloud credentials
-        uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6 # v1
-        with:
-          oidc-provider-arn: ${{ vars.ALIYUN_OIDC_PROVIDER_ARN }}
-          role-to-assume: ${{ vars.ALIYUN_OIDC_ROLE_ARN }}
-          role-session-name: joysong-uat-${{ github.run_id }}
-          role-session-expiration: 3600
-          audience: github-actions
-      - name: Install pinned Alibaba Cloud CLI
-        run: bash joysong-server/deploy/ci/install-aliyun-cli.sh
-      - name: Upload bundle and deploy existing ECS UAT
-        id: deploy
+  deploy:
+    needs: [preflight, build]
+    runs-on: joysong-uat-deploy
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      COMMIT: ${{ github.sha }}
+      RUN_ID: ${{ github.run_id }}
+      ARTIFACT_NAME: ${{ needs.build.outputs.artifact_name }}
+      BUNDLE_NAME: ${{ needs.build.outputs.bundle_name }}
+      EXPECTED_SHA256: ${{ needs.build.outputs.bundle_sha256 }}
+    steps:
+      - name: Download this run artifact and invoke the fixed deploy entrypoint
         shell: bash
         run: |
           set -Eeuo pipefail
-          bundle="release/joysong-ecs-${GITHUB_REF_NAME}.tar.gz"
-          bash joysong-server/deploy/ci/publish-and-deploy.sh \
-            uat "$GITHUB_REF_NAME" "$GITHUB_SHA" "$bundle"
-      - name: Verify public UAT routes or atomically roll back
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 - "$UAT_API_BASE_URL" "$UAT_ADMIN_BASE_URL" <<'PY'
-          import sys
-          from urllib.parse import urlsplit
+          umask 077
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-uat\.(0|[1-9][0-9]*)$ ]]
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RUN_ID" =~ ^[1-9][0-9]{0,18}$ ]]
+          [[ "${#RUN_ID}" -lt 19 || "$RUN_ID" < "$UAT_MAX_RUN_ID" || "$RUN_ID" == "$UAT_MAX_RUN_ID" ]]
+          [[ "$EXPECTED_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$ARTIFACT_NAME" == "joysong-uat-$TAG" ]]
+          [[ "$BUNDLE_NAME" == "joysong-uat-$TAG.tar.gz" ]]
 
-          api, admin = map(urlsplit, sys.argv[1:])
-          allowed = {
-              ("api.joyingsong.net", "joyingsong.net"),
-              ("api-uat.joyingsong.net", "uat.joyingsong.net"),
+          incoming_root=/var/lib/joysong-deploy/incoming
+          incoming="$incoming_root/$RUN_ID"
+          [[ -d "$incoming_root" && ! -L "$incoming_root" ]]
+          [[ ! -e "$incoming" && ! -L "$incoming" ]]
+          /usr/bin/mkdir -m 0700 -- "$incoming"
+
+          metadata="$RUNNER_TEMP/joysong-artifacts-$RUN_ID.json"
+          artifact_zip="$incoming/artifact.zip"
+          cleanup() {
+            /usr/bin/rm -f -- "$metadata" "$artifact_zip" \
+              "$incoming/$BUNDLE_NAME" "$incoming/$BUNDLE_NAME.sha256"
+            /usr/bin/rmdir -- "$incoming" 2>/dev/null || true
           }
-          if ((api.hostname, admin.hostname) not in allowed or
-                  api.scheme != "https" or admin.scheme != "https" or
-                  api.port not in (None, 443) or admin.port not in (None, 443) or
-                  api.path not in ("", "/") or admin.path not in ("", "/") or
-                  api.username or api.password or admin.username or admin.password or
-                  api.query or api.fragment or admin.query or admin.fragment):
-              raise SystemExit("UAT URLs must be one approved API/Admin HTTPS origin pair")
+          trap cleanup EXIT
+          api_headers=(
+            -H "Accept: application/vnd.github+json"
+            -H "Authorization: Bearer $GH_TOKEN"
+            -H "X-GitHub-Api-Version: 2022-11-28"
+          )
+          /usr/bin/curl -q --noproxy '*' --fail --silent --show-error --location \
+            --proto '=https' --retry 3 --retry-delay 2 \
+            --max-filesize 1048576 \
+            "${api_headers[@]}" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
+            --output "$metadata"
+          artifact_id="$(
+            /usr/bin/python3 -I - "$metadata" "$ARTIFACT_NAME" <<'PY'
+          import json
+          import sys
+
+          metadata_path, expected_name = sys.argv[1:]
+          with open(metadata_path, "r", encoding="utf-8") as stream:
+              data = json.load(stream)
+          artifacts = data.get("artifacts")
+          if data.get("total_count") != 1 or not isinstance(artifacts, list) or len(artifacts) != 1:
+              raise SystemExit("the workflow run must expose exactly one Artifact")
+          artifact = artifacts[0]
+          if artifact.get("name") != expected_name or artifact.get("expired") is not False:
+              raise SystemExit("the workflow Artifact identity is invalid or expired")
+          artifact_id = artifact.get("id")
+          if isinstance(artifact_id, bool) or not isinstance(artifact_id, int) or artifact_id < 1:
+              raise SystemExit("the workflow Artifact ID is invalid")
+          print(artifact_id)
           PY
-          api_base="${UAT_API_BASE_URL%/}"
-          admin_base="${UAT_ADMIN_BASE_URL%/}"
-          if ! curl --fail --silent --show-error --max-time 15 \
-                 "$api_base/.well-known/joysong-release.json" >"$RUNNER_TEMP/api-release.json" ||
-             ! cmp --silent release/release.json "$RUNNER_TEMP/api-release.json" ||
-             ! curl --fail --silent --show-error --max-time 15 \
-                 "$admin_base/.well-known/joysong-release.json" >"$RUNNER_TEMP/admin-release.json" ||
-             ! cmp --silent release/release.json "$RUNNER_TEMP/admin-release.json" ||
-             ! curl --fail --silent --show-error --max-time 15 "$api_base/actuator/health" >/dev/null ||
-             ! curl --fail --silent --show-error --max-time 15 "$admin_base/" >/dev/null ||
-             ! curl --fail --silent --show-error --max-time 15 "$admin_base/orders" >/dev/null; then
-            echo "Public UAT checks failed; restoring the verified previous release." >&2
-            set +e
-            bash joysong-server/deploy/ci/cloud-assistant.sh recover-public-failure uat "$GITHUB_REF_NAME"
-            rollback_status=$?
-            set -e
-            if ((rollback_status != 0)); then
-              echo "Automatic rollback also failed; immediate operator intervention is required." >&2
-            fi
+          )"
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]]
+          /usr/bin/curl -q --noproxy '*' --fail --silent --show-error --location \
+            --proto '=https' --retry 3 --retry-delay 2 \
+            --max-filesize "$UAT_MAX_ARTIFACT_ZIP_BYTES" \
+            "${api_headers[@]}" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+            --output "$artifact_zip"
+
+          /usr/bin/python3 -I - "$artifact_zip" "$incoming" "$BUNDLE_NAME" \
+            "$EXPECTED_SHA256" "$UAT_MAX_BUNDLE_BYTES" "$UAT_MAX_ARTIFACT_ZIP_BYTES" \
+            "$UAT_MAX_SIDECAR_BYTES" "$UAT_MIN_FREE_AFTER_EXTRACT_BYTES" <<'PY_EXTRACT_UAT_ARTIFACT'
+          import hashlib
+          import os
+          import stat
+          import struct
+          import sys
+          import zipfile
+
+          (
+              archive_path,
+              destination_root,
+              bundle_name,
+              expected_sha256,
+              max_bundle_text,
+              max_archive_text,
+              max_sidecar_text,
+              free_reserve_text,
+          ) = sys.argv[1:]
+          max_bundle = int(max_bundle_text)
+          max_archive = int(max_archive_text)
+          max_sidecar = int(max_sidecar_text)
+          free_reserve = int(free_reserve_text)
+          sidecar_name = bundle_name + ".sha256"
+          expected_names = {bundle_name, sidecar_name}
+
+          archive_details = os.lstat(archive_path)
+          if (
+              not stat.S_ISREG(archive_details.st_mode)
+              or archive_details.st_nlink != 1
+              or archive_details.st_size <= 0
+              or archive_details.st_size > max_archive
+          ):
+              raise SystemExit("Artifact ZIP must be one bounded regular file")
+          end_record_size = 22
+          max_comment_size = 65535
+          with open(archive_path, "rb") as raw_archive:
+              tail_size = min(archive_details.st_size, end_record_size + max_comment_size)
+              raw_archive.seek(archive_details.st_size - tail_size)
+              tail = raw_archive.read(tail_size)
+          end_offset = tail.rfind(b"PK\x05\x06")
+          if end_offset < 0 or end_offset + end_record_size > len(tail):
+              raise SystemExit("Artifact ZIP end record is missing")
+          (
+              signature,
+              disk_number,
+              central_disk,
+              disk_entries,
+              central_entries,
+              central_size,
+              central_offset,
+              comment_size,
+          ) = struct.unpack_from("<4s4H2LH", tail, end_offset)
+          absolute_end_offset = archive_details.st_size - tail_size + end_offset
+          if (
+              signature != b"PK\x05\x06"
+              or disk_number != 0
+              or central_disk != 0
+              or disk_entries != 2
+              or central_entries != 2
+              or central_size > 8192
+              or central_offset + central_size != absolute_end_offset
+              or comment_size != 0
+              or end_offset + end_record_size != len(tail)
+          ):
+              raise SystemExit("Artifact ZIP central directory is not the bounded two-file form")
+          destination_details = os.lstat(destination_root)
+          if not stat.S_ISDIR(destination_details.st_mode):
+              raise SystemExit("Artifact destination must be a real directory")
+
+          with zipfile.ZipFile(archive_path, "r") as archive:
+              members = archive.infolist()
+              names = [member.filename for member in members]
+              if len(members) != 2 or len(set(names)) != 2 or set(names) != expected_names:
+                  raise SystemExit("Artifact ZIP must contain exactly the bundle and sidecar")
+
+              expanded = 0
+              for member in members:
+                  unix_mode = (member.external_attr >> 16) & 0xFFFF
+                  file_type = stat.S_IFMT(unix_mode)
+                  maximum = max_bundle if member.filename == bundle_name else max_sidecar
+                  if (
+                      member.is_dir()
+                      or member.flag_bits & 0x1
+                      or member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+                      or file_type not in (0, stat.S_IFREG)
+                      or member.file_size <= 0
+                      or member.file_size > maximum
+                      or member.compress_size < 0
+                      or member.compress_size > archive_details.st_size
+                  ):
+                      raise SystemExit("Artifact ZIP contains an unsafe or oversized member")
+                  expanded += member.file_size
+
+              capacity = os.statvfs(destination_root)
+              available = capacity.f_bavail * capacity.f_frsize
+              if available < expanded + free_reserve:
+                  raise SystemExit("insufficient capacity to extract the bounded Artifact")
+
+              bundle_digest = None
+              for member in members:
+                  destination = os.path.join(destination_root, member.filename)
+                  flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                  if hasattr(os, "O_NOFOLLOW"):
+                      flags |= os.O_NOFOLLOW
+                  descriptor = os.open(destination, flags, 0o600)
+                  digest = hashlib.sha256()
+                  copied = 0
+                  try:
+                      with archive.open(member, "r") as source, os.fdopen(descriptor, "wb") as target:
+                          descriptor = None
+                          while True:
+                              chunk = source.read(1024 * 1024)
+                              if not chunk:
+                                  break
+                              copied += len(chunk)
+                              if copied > member.file_size:
+                                  raise SystemExit("Artifact member exceeded its declared size")
+                              digest.update(chunk)
+                              target.write(chunk)
+                          target.flush()
+                          os.fsync(target.fileno())
+                  finally:
+                      if descriptor is not None:
+                          os.close(descriptor)
+                  if copied != member.file_size:
+                      raise SystemExit("Artifact member size differs from its ZIP metadata")
+                  if member.filename == bundle_name:
+                      bundle_digest = digest.hexdigest()
+
+          if bundle_digest != expected_sha256:
+              raise SystemExit("Artifact bundle SHA-256 differs from the hosted build output")
+          with open(os.path.join(destination_root, sidecar_name), "rb") as sidecar:
+              expected_sidecar = (expected_sha256 + "  " + bundle_name + "\n").encode("ascii")
+              if sidecar.read(max_sidecar + 1) != expected_sidecar:
+                  raise SystemExit("Artifact SHA-256 sidecar is not canonical")
+          PY_EXTRACT_UAT_ARTIFACT
+          /usr/bin/rm -f -- "$artifact_zip"
+
+          bundle="$incoming/$BUNDLE_NAME"
+          sidecar="$bundle.sha256"
+          [[ -f "$bundle" && ! -L "$bundle" && -f "$sidecar" && ! -L "$sidecar" ]]
+          [[ "$(/usr/bin/awk 'NF { print $1; exit }' "$sidecar")" == "$EXPECTED_SHA256" ]]
+
+          /usr/bin/sudo -n /usr/local/sbin/joysong-uat-deploy \
+            preflight "$TAG" "$COMMIT" "$RUN_ID" "$EXPECTED_SHA256"
+          /usr/bin/sudo -n /usr/local/sbin/joysong-uat-deploy \
+            deploy "$TAG" "$COMMIT" "$RUN_ID" "$EXPECTED_SHA256"
+
+  publish:
+    needs: [build, deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      BUNDLE_NAME: ${{ needs.build.outputs.bundle_name }}
+      BUNDLE_SHA256: ${{ needs.build.outputs.bundle_sha256 }}
+      STATUS_TEXT: UAT Candidate 已部署，公网未 Ready
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ needs.build.outputs.artifact_name }}
+          path: release
+      - name: Verify release assets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bundle="release/$BUNDLE_NAME"
+          sidecar="$bundle.sha256"
+          [[ -f "$bundle" && ! -L "$bundle" && -f "$sidecar" && ! -L "$sidecar" ]]
+          [[ "$(sha256sum "$bundle" | awk '{print $1}')" == "$BUNDLE_SHA256" ]]
+          [[ "$(awk 'NF { print $1; exit }' "$sidecar")" == "$BUNDLE_SHA256" ]]
+          [[ "$(find release -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" == "2" ]]
+      - id: issue
+        name: Create or update backend and admin acceptance issue
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh label create uat-awaiting-acceptance --color D4C5F9 --force
+          issue_title="UAT 验收：$TAG"
+          issue_body="$RUNNER_TEMP/uat-acceptance.md"
+          cat >"$issue_body" <<EOF
+          <!-- joysong-acceptance-schema:2 -->
+          <!-- joysong-uat-tag:$TAG -->
+          <!-- joysong-commit:$GITHUB_SHA -->
+          <!-- joysong-run-id:$GITHUB_RUN_ID -->
+          <!-- joysong-bundle-sha256:$BUNDLE_SHA256 -->
+
+          ## UAT Candidate 验收
+
+          当前状态：$STATUS_TEXT
+
+          - [ ] joysong-demo.service 保持 active/enabled，且新 MainPID 独占 127.0.0.1:8080
+          - [ ] 实际运行 JAR、Backend current 与 $TAG / $GITHUB_SHA 一致
+          - [ ] Admin current 与 $TAG / $GITHUB_SHA 一致，首页和深层路由通过本机 Host 验证
+          - [ ] 首次部署时 Backend/Admin previous 均不存在；后续部署时 previous pair 完整且身份一致
+          - [ ] /actuator/health 健康
+          - [ ] Flyway history 为成功的 B33 + V34…V40，且与本次 JAR migration digest 一致
+          - [ ] 数据库、配置和必要持久数据备份完整且 SHA-256 校验成功
+          - [ ] Nginx、数据库及两个业务 Bucket 均未改变
+          - [ ] ICP、DNS、TLS 和公网业务验收在后续门禁中单独完成
+          EOF
+
+          issues_json="$(gh issue list --state all --limit 100 --json number,title,url)"
+          mapfile -t issue_numbers < <(
+            jq -r --arg title "$issue_title" '.[] | select(.title == $title) | .number' <<<"$issues_json"
+          )
+          if ((${#issue_numbers[@]} == 0)); then
+            issue_url="$(gh issue create \
+              --title "$issue_title" \
+              --label uat-awaiting-acceptance \
+              --body-file "$issue_body")"
+          elif ((${#issue_numbers[@]} == 1)); then
+            gh issue edit "${issue_numbers[0]}" \
+              --add-label uat-awaiting-acceptance \
+              --body-file "$issue_body"
+            issue_url="$(gh issue view "${issue_numbers[0]}" --json url --jq .url)"
+          else
+            echo "Multiple acceptance issues already exist for immutable tag $TAG." >&2
             exit 1
           fi
-      - name: Open manual acceptance issue
-        id: issue
-        env:
-          MANIFEST_SHA: ${{ steps.release.outputs.manifest_sha }}
-        shell: bash
-        run: |
-          gh label create uat-awaiting-acceptance --color D4C5F9 --force
-          gh label create uat-accepted --color 0E8A16 --force
-          cat >"$RUNNER_TEMP/acceptance.md" <<EOF
-          <!-- joysong-acceptance-schema:1 -->
-          <!-- joysong-uat-tag:$GITHUB_REF_NAME -->
-          <!-- joysong-commit:$GITHUB_SHA -->
-          <!-- joysong-manifest-sha:$MANIFEST_SHA -->
-          ## UAT 业务验收
-
-          - [ ] 使用既有测试账号完成密码登录
-          - [ ] 虚构机构、医生、项目和内容正常
-          - [ ] AI 对话与翻译正常
-          - [ ] OSS 图片上传与读取正常
-          - [ ] 用户手动点击后模拟支付立即成功
-          - [ ] 用户提交全额退款，管理员批准后模拟退款成功
-          - [ ] 使用上一 UAT 版本覆盖安装 APK，数据保留
-
-          全部通过后：移除 \`uat-awaiting-acceptance\`，添加 \`uat-accepted\` 并关闭 Issue。
-          EOF
-          issue_url="$(gh issue create \
-            --title "UAT 验收：$GITHUB_REF_NAME" \
-            --label uat-awaiting-acceptance \
-            --body-file "$RUNNER_TEMP/acceptance.md")"
           echo "url=$issue_url" >>"$GITHUB_OUTPUT"
-      - name: Link acceptance evidence to draft release
+      - id: release
+        name: Create or update private Draft Release
         env:
           ISSUE_URL: ${{ steps.issue.outputs.url }}
+        shell: bash
         run: |
-          gh release view "$GITHUB_REF_NAME" --json body --jq .body >"$RUNNER_TEMP/release-notes.md"
-          printf '\nManual acceptance: %s\n' "$ISSUE_URL" >>"$RUNNER_TEMP/release-notes.md"
-          gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/release-notes.md"
+          set -Eeuo pipefail
+          notes="$RUNNER_TEMP/uat-release-notes.md"
+          cat >"$notes" <<EOF
+          UAT candidate built from commit $GITHUB_SHA.
+
+          Status: $STATUS_TEXT
+          Acceptance issue: $ISSUE_URL
+          Deployment bundle SHA-256: $BUNDLE_SHA256
+          EOF
+
+          release_error="$RUNNER_TEMP/release-error"
+          if release_metadata="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>"$release_error")"; then
+            jq -e '.draft == true' <<<"$release_metadata" >/dev/null || {
+              echo "Refusing to update a non-draft immutable release." >&2
+              exit 1
+            }
+            actual_assets="$(jq -r '.assets[].name' <<<"$release_metadata" | LC_ALL=C sort)"
+            expected_assets="$(printf '%s\n' "$BUNDLE_NAME" "$BUNDLE_NAME.sha256" | LC_ALL=C sort)"
+            if [[ -z "$actual_assets" ]]; then
+              gh release upload "$TAG" "release/$BUNDLE_NAME" "release/$BUNDLE_NAME.sha256"
+            elif [[ "$actual_assets" == "$expected_assets" ]]; then
+              existing="$RUNNER_TEMP/existing-release"
+              mkdir "$existing"
+              gh release download "$TAG" --dir "$existing" \
+                --pattern "$BUNDLE_NAME" \
+                --pattern "$BUNDLE_NAME.sha256"
+              cmp --silent "release/$BUNDLE_NAME" "$existing/$BUNDLE_NAME"
+              cmp --silent "release/$BUNDLE_NAME.sha256" "$existing/$BUNDLE_NAME.sha256"
+            else
+              echo "Existing draft release assets do not match the immutable candidate." >&2
+              exit 1
+            fi
+            gh release edit "$TAG" --draft \
+              --title "JoySong $TAG" \
+              --notes-file "$notes"
+          elif grep -Fq "(HTTP 404)" "$release_error"; then
+            gh release create "$TAG" "release/$BUNDLE_NAME" "release/$BUNDLE_NAME.sha256" \
+              --verify-tag --draft \
+              --title "JoySong $TAG" \
+              --notes-file "$notes"
+          else
+            cat "$release_error" >&2
+            exit 1
+          fi
+          release_url="$(gh release view "$TAG" --json url --jq .url)"
+          echo "url=$release_url" >>"$GITHUB_OUTPUT"
+          {
+            echo "Draft Release: $release_url"
+            echo "Acceptance Issue: $ISSUE_URL"
+            echo "Bundle SHA-256: $BUNDLE_SHA256"
+            echo "Status: $STATUS_TEXT"
+          } >>"$GITHUB_STEP_SUMMARY"

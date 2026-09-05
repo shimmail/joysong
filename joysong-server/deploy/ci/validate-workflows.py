@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -8,257 +9,687 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 WORKFLOWS = ROOT / ".github" / "workflows"
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
-MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+USES = re.compile(r"^\s*-?\s*uses:\s*([^\s#]+)", re.MULTILINE)
+RUNS_ON = re.compile(r"^\s+runs-on:\s*(.*?)\s*$", re.MULTILINE)
+JOB_HEADER = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$", re.MULTILINE)
+HOSTED_RUNNERS = {"ubuntu-latest", "windows-latest", "macos-latest"}
+EXPECTED_BUNDLE_MEMBERS = {
+    "joysong-server.jar",
+    "joysong-admin.tar.gz",
+    "manifest.json",
+    "release.json",
+    "sbom.cdx.json",
+    "scan-report.json",
+    "SHA256SUMS",
+}
+EXPECTED_MANIFEST_ARTIFACTS = EXPECTED_BUNDLE_MEMBERS - {
+    "manifest.json",
+    "SHA256SUMS",
+}
+RESOURCE_LIMIT_NAME_MAP = {
+    "MAX_BUNDLE_COMPRESSED_BYTES": "MAX_BUNDLE_BYTES",
+    "MAX_BUNDLE_EXPANDED_BYTES": "MAX_OUTER_EXPANDED_BYTES",
+    "MAX_BUNDLE_MEMBERS": "MAX_BUNDLE_MEMBERS",
+    "MAX_JAR_BYTES": "MAX_JAR_BYTES",
+    "MAX_JAR_MEMBERS": "MAX_JAR_MEMBERS",
+    "MAX_JAR_EXPANDED_BYTES": "MAX_JAR_EXPANDED_BYTES",
+    "MAX_JAR_ENTRY_BYTES": "MAX_JAR_MEMBER_BYTES",
+    "MAX_MIGRATION_MEMBERS": "MAX_MIGRATION_MEMBERS",
+    "MAX_MIGRATION_EXPANDED_BYTES": "MAX_MIGRATION_BYTES",
+    "MAX_MIGRATION_ENTRY_BYTES": "MAX_MIGRATION_MEMBER_BYTES",
+    "MAX_ADMIN_ARCHIVE_BYTES": "MAX_ADMIN_BYTES",
+    "MAX_ADMIN_MEMBERS": "MAX_ADMIN_MEMBERS",
+    "MAX_ADMIN_EXPANDED_BYTES": "MAX_ADMIN_EXPANDED_BYTES",
+    "MAX_ADMIN_FILE_BYTES": "MAX_ADMIN_MEMBER_BYTES",
+    "MAX_METADATA_BYTES": "MAX_SMALL_METADATA_BYTES",
+    "MAX_SBOM_BYTES": "MAX_METADATA_BYTES",
+    "MAX_SCAN_REPORT_BYTES": "MAX_METADATA_BYTES",
+    "MAX_MEMBER_NAME_BYTES": "MAX_MEMBER_NAME_BYTES",
+}
+PYTHON_TAG_PATTERN = (
+    r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"-uat\.(?:0|[1-9][0-9]*)$"
+)
+BASH_TAG_PATTERN = (
+    r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"-uat\.(0|[1-9][0-9]*)$"
+)
+RUN_ID_PATTERN = r"^[1-9][0-9]{0,18}$"
+RUN_ID_MAX = 9223372036854775807
+WORKFLOW_LIMITS = {
+    "UAT_MAX_RUN_ID": RUN_ID_MAX,
+    "UAT_MAX_ARTIFACT_ZIP_BYTES": 1088 * 1024 * 1024,
+    "UAT_MAX_SIDECAR_BYTES": 4096,
+    "UAT_MIN_FREE_AFTER_EXTRACT_BYTES": 64 * 1024 * 1024,
+}
 
 
-def main() -> None:
-    errors: list[str] = []
-    workflow_paths = sorted(WORKFLOWS.glob("*.yml"))
-    if not workflow_paths:
-        errors.append("no workflows found")
-    for path in workflow_paths:
-        text = path.read_text(encoding="utf-8")
-        for line_number, line in enumerate(text.splitlines(), 1):
-            match = re.match(r"\s*-?\s*uses:\s*([^\s#]+)", line)
-            if not match:
+def read_required(path: Path, errors: list[str]) -> str:
+    if not path.is_file():
+        errors.append(f"missing deployment asset: {path.relative_to(ROOT)}")
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
+def require_snippets(
+    path: Path, text: str, snippets: tuple[str, ...], errors: list[str]
+) -> None:
+    for snippet in snippets:
+        if snippet not in text:
+            errors.append(f"{path.relative_to(ROOT)}: missing required contract: {snippet}")
+
+
+class StaticValueError(ValueError):
+    pass
+
+
+def evaluate_static(node: ast.AST, values: dict[str, object]) -> object:
+    if isinstance(node, ast.Constant) and type(node.value) in (int, str):
+        return node.value
+    if isinstance(node, ast.Name) and node.id in values:
+        return values[node.id]
+    if isinstance(node, ast.Tuple):
+        return tuple(evaluate_static(element, values) for element in node.elts)
+    if isinstance(node, ast.List):
+        return [evaluate_static(element, values) for element in node.elts]
+    if isinstance(node, ast.Set):
+        return {evaluate_static(element, values) for element in node.elts}
+    if isinstance(node, ast.BinOp):
+        left = evaluate_static(node.left, values)
+        right = evaluate_static(node.right, values)
+        if isinstance(node.op, ast.Mult) and type(left) is int and type(right) is int:
+            return left * right
+        if isinstance(node.op, ast.Add) and type(left) is int and type(right) is int:
+            return left + right
+        if isinstance(node.op, ast.Sub):
+            if type(left) is int and type(right) is int:
+                return left - right
+            if isinstance(left, set) and isinstance(right, set):
+                return left - right
+    raise StaticValueError("not a supported static value")
+
+
+def parse_module_contract(
+    path: Path, errors: list[str]
+) -> tuple[dict[str, object], dict[str, str], set[str]]:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError) as error:
+        errors.append(f"{path.relative_to(ROOT)}: cannot parse release contract: {error}")
+        return {}, {}, set()
+
+    values: dict[str, object] = {}
+    patterns: dict[str, str] = {}
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+            continue
+        target = statement.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        try:
+            values[target.id] = evaluate_static(statement.value, values)
+        except StaticValueError:
+            pass
+        call = statement.value
+        if (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "re"
+            and call.func.attr == "compile"
+            and len(call.args) == 1
+        ):
+            try:
+                pattern = evaluate_static(call.args[0], values)
+            except StaticValueError:
                 continue
+            if isinstance(pattern, str):
+                patterns[target.id] = pattern
+
+    loaded = {
+        node.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+    }
+    return values, patterns, loaded
+
+
+def require_exact_names(
+    path: Path,
+    label: str,
+    actual: object,
+    expected: set[str],
+    errors: list[str],
+) -> None:
+    if not isinstance(actual, (tuple, list, set)):
+        errors.append(f"{path.relative_to(ROOT)}: {label} is not a static collection")
+        return
+    names = list(actual)
+    if len(names) != len(expected) or set(names) != expected:
+        errors.append(
+            f"{path.relative_to(ROOT)}: {label} must be exactly {sorted(expected)}, "
+            f"got {sorted(names)}"
+        )
+
+
+def validate_release_cross_contract(
+    packager_path: Path,
+    verifier_path: Path,
+    host_entry_path: Path,
+    candidate_path: Path,
+    candidate_text: str,
+    errors: list[str],
+) -> None:
+    packager, packager_patterns, packager_loaded = parse_module_contract(
+        packager_path, errors
+    )
+    verifier, verifier_patterns, verifier_loaded = parse_module_contract(
+        verifier_path, errors
+    )
+
+    require_exact_names(
+        packager_path,
+        "PAYLOAD_NAMES",
+        packager.get("PAYLOAD_NAMES"),
+        EXPECTED_BUNDLE_MEMBERS,
+        errors,
+    )
+    require_exact_names(
+        packager_path,
+        "ARTIFACT_NAMES",
+        packager.get("ARTIFACT_NAMES"),
+        EXPECTED_MANIFEST_ARTIFACTS,
+        errors,
+    )
+    require_exact_names(
+        verifier_path,
+        "EXPECTED_MEMBERS",
+        verifier.get("EXPECTED_MEMBERS"),
+        EXPECTED_BUNDLE_MEMBERS,
+        errors,
+    )
+    require_exact_names(
+        verifier_path,
+        "ARTIFACT_NAMES",
+        verifier.get("ARTIFACT_NAMES"),
+        EXPECTED_MANIFEST_ARTIFACTS,
+        errors,
+    )
+
+    packager_limits = {
+        name: value
+        for name, value in packager.items()
+        if name.startswith("MAX_") and name != "MAX_RUN_ID"
+    }
+    verifier_limits = {
+        name: value for name, value in verifier.items() if name.startswith("MAX_")
+    }
+    if set(packager_limits) != set(RESOURCE_LIMIT_NAME_MAP):
+        errors.append(
+            f"{packager_path.relative_to(ROOT)}: resource limits must be exactly "
+            f"{sorted(RESOURCE_LIMIT_NAME_MAP)}, got {sorted(packager_limits)}"
+        )
+    expected_verifier_limits = set(RESOURCE_LIMIT_NAME_MAP.values())
+    if set(verifier_limits) != expected_verifier_limits:
+        errors.append(
+            f"{verifier_path.relative_to(ROOT)}: resource limits must be exactly "
+            f"{sorted(expected_verifier_limits)}, got {sorted(verifier_limits)}"
+        )
+    for packager_name, verifier_name in RESOURCE_LIMIT_NAME_MAP.items():
+        if packager_name not in packager_limits or verifier_name not in verifier_limits:
+            continue
+        if packager_limits[packager_name] != verifier_limits[verifier_name]:
+            errors.append(
+                f"release limit mismatch: {packager_name}={packager_limits[packager_name]} "
+                f"but {verifier_name}={verifier_limits[verifier_name]}"
+            )
+        if packager_name not in packager_loaded:
+            errors.append(f"{packager_path.relative_to(ROOT)}: unused limit {packager_name}")
+        if verifier_name not in verifier_loaded:
+            errors.append(f"{verifier_path.relative_to(ROOT)}: unused limit {verifier_name}")
+
+    if packager.get("MAX_BUNDLE_MEMBERS") != len(EXPECTED_BUNDLE_MEMBERS):
+        errors.append("MAX_BUNDLE_MEMBERS must equal the exact bundle member count")
+    if packager_patterns.get("TAG_PATTERN") != PYTHON_TAG_PATTERN:
+        errors.append(f"{packager_path.relative_to(ROOT)}: TAG_PATTERN is not canonical")
+    if verifier_patterns.get("TAG_RE") != PYTHON_TAG_PATTERN:
+        errors.append(f"{verifier_path.relative_to(ROOT)}: TAG_RE is not canonical")
+    if packager_patterns.get("RUN_ID_PATTERN") != RUN_ID_PATTERN:
+        errors.append(f"{packager_path.relative_to(ROOT)}: RUN_ID_PATTERN is not canonical")
+    if verifier_patterns.get("RUN_ID_RE") != RUN_ID_PATTERN:
+        errors.append(f"{verifier_path.relative_to(ROOT)}: RUN_ID_RE is not canonical")
+    if packager.get("MAX_RUN_ID") != RUN_ID_MAX:
+        errors.append(f"{packager_path.relative_to(ROOT)}: MAX_RUN_ID is not signed 64-bit")
+    if verifier.get("RUN_ID_MAX") != RUN_ID_MAX:
+        errors.append(f"{verifier_path.relative_to(ROOT)}: RUN_ID_MAX is not signed 64-bit")
+
+    host_text = read_required(host_entry_path, errors)
+    host_tag = re.search(r"^TAG_RE='([^']+)'$", host_text, re.MULTILINE)
+    host_run_id = re.search(r"^RUN_ID_RE='([^']+)'$", host_text, re.MULTILINE)
+    host_run_id_max = re.search(r"^readonly RUN_ID_MAX=([0-9]+)$", host_text, re.MULTILINE)
+    if host_tag is None or host_tag.group(1) != BASH_TAG_PATTERN:
+        errors.append(f"{host_entry_path.relative_to(ROOT)}: TAG_RE is not canonical")
+    if host_run_id is None or host_run_id.group(1) != RUN_ID_PATTERN:
+        errors.append(f"{host_entry_path.relative_to(ROOT)}: RUN_ID_RE is not canonical")
+    if host_run_id_max is None or int(host_run_id_max.group(1)) != RUN_ID_MAX:
+        errors.append(f"{host_entry_path.relative_to(ROOT)}: RUN_ID_MAX is not signed 64-bit")
+
+    tag_assertion = f'[[ "$TAG" =~ {BASH_TAG_PATTERN} ]]'
+    if candidate_text.count(tag_assertion) != 2:
+        errors.append(
+            f"{candidate_path.relative_to(ROOT)}: canonical tag assertion must occur twice"
+        )
+    if f'[[ "$GITHUB_RUN_ID" =~ {RUN_ID_PATTERN} ]]' not in candidate_text:
+        errors.append(f"{candidate_path.relative_to(ROOT)}: preflight run ID bound is missing")
+    if f'[[ "$RUN_ID" =~ {RUN_ID_PATTERN} ]]' not in candidate_text:
+        errors.append(f"{candidate_path.relative_to(ROOT)}: deploy run ID bound is missing")
+    for variable in ("GITHUB_RUN_ID", "RUN_ID"):
+        maximum_assertion = (
+            f'[[ "${{#{variable}}}" -lt 19 || "${variable}" < "$UAT_MAX_RUN_ID" || '
+            f'"${variable}" == "$UAT_MAX_RUN_ID" ]]'
+        )
+        if candidate_text.count(maximum_assertion) != 1:
+            errors.append(
+                f"{candidate_path.relative_to(ROOT)}: {variable} signed 64-bit bound is missing"
+            )
+    bundle_limit = packager.get("MAX_BUNDLE_COMPRESSED_BYTES")
+    expected_workflow_limits = {
+        **WORKFLOW_LIMITS,
+        "UAT_MAX_BUNDLE_BYTES": bundle_limit,
+    }
+    for name, value in expected_workflow_limits.items():
+        if candidate_text.count(f"{name}: '{value}'") != 1:
+            errors.append(
+                f"{candidate_path.relative_to(ROOT)}: {name} is not the canonical {value}"
+            )
+
+    require_snippets(
+        candidate_path,
+        candidate_text,
+        (
+            "${{ runner.temp }}/release/${{ steps.package.outputs.bundle_name }}\n"
+            "            ${{ runner.temp }}/release/${{ steps.package.outputs.bundle_name }}.sha256",
+            'expected_names = {bundle_name, sidecar_name}',
+            'expected_assets="$(printf \'%s\\n\' "$BUNDLE_NAME" "$BUNDLE_NAME.sha256"',
+            "/usr/bin/curl -q --noproxy '*'",
+            "/usr/bin/python3 -I -",
+            "PY_EXTRACT_UAT_ARTIFACT",
+            "archive_details.st_nlink != 1",
+            "central_entries != 2",
+            "central_size > 8192",
+            "len(members) != 2 or len(set(names)) != 2",
+            "member.flag_bits & 0x1",
+            "file_type not in (0, stat.S_IFREG)",
+            "available < expanded + free_reserve",
+            "os.O_WRONLY | os.O_CREAT | os.O_EXCL",
+            'flags |= os.O_NOFOLLOW',
+            "bundle_digest != expected_sha256",
+            'raise SystemExit("Artifact SHA-256 sidecar is not canonical")',
+            "--max-filesize 1048576",
+            '--max-filesize "$UAT_MAX_ARTIFACT_ZIP_BYTES"',
+        ),
+        errors,
+    )
+    if "/usr/bin/unzip" in candidate_text or re.search(r"(?:^|\s)unzip(?:\s|$)", candidate_text):
+        errors.append(
+            f"{candidate_path.relative_to(ROOT)}: unbounded unzip is forbidden on the UAT runner"
+        )
+
+
+def extract_jobs(path: Path, text: str, errors: list[str]) -> dict[str, str]:
+    marker = re.search(r"^jobs:\s*$", text, re.MULTILINE)
+    if marker is None:
+        errors.append(f"{path.relative_to(ROOT)}: jobs mapping is missing")
+        return {}
+    body = text[marker.end() :]
+    matches = list(JOB_HEADER.finditer(body))
+    jobs: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        start = match.start()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        jobs[match.group(1)] = body[start:end]
+    return jobs
+
+
+def require_runner(
+    path: Path,
+    jobs: dict[str, str],
+    job_name: str,
+    expected: str,
+    errors: list[str],
+) -> None:
+    block = jobs.get(job_name)
+    if block is None:
+        errors.append(f"{path.relative_to(ROOT)}: missing job: {job_name}")
+        return
+    match = re.search(r"^    runs-on:\s*(.*?)\s*$", block, re.MULTILINE)
+    if match is None or match.group(1) != expected:
+        actual = match.group(1) if match else "<missing>"
+        errors.append(
+            f"{path.relative_to(ROOT)}: {job_name} must run on exactly {expected}, got {actual}"
+        )
+
+
+def validate_action_pins(
+    workflow_paths: list[Path], workflow_texts: dict[Path, str], errors: list[str]
+) -> None:
+    for path in workflow_paths:
+        for match in USES.finditer(workflow_texts[path]):
             reference = match.group(1)
             if reference.startswith("./"):
                 continue
             if "@" not in reference or not FULL_SHA.fullmatch(reference.rsplit("@", 1)[1]):
-                errors.append(f"{path}:{line_number}: action is not pinned to a full commit SHA")
-        if path.name in {"uat-candidate.yml", "uat-rollback.yml", "prod-deploy.yml"}:
-            if "cancel-in-progress: false" not in text:
-                errors.append(f"{path}: active deployments must not be cancelled")
-        if "channel: stable" in text:
-            errors.append(f"{path}: Flutter SDK must be pinned to an exact version")
-        for obsolete in ("ALIYUN_DEPLOY_ROLE_ARN", "ALIYUN_OSS_ENDPOINT", "UAT_ANDROID_", "PROD_ANDROID_"):
-            if obsolete in text:
-                errors.append(f"{path}: obsolete CI configuration name is forbidden: {obsolete}")
+                line = workflow_texts[path].count("\n", 0, match.start()) + 1
+                errors.append(
+                    f"{path.relative_to(ROOT)}:{line}: action is not pinned to a full commit SHA"
+                )
 
-    quality_gates = WORKFLOWS / "quality-gates.yml"
-    if quality_gates.is_file():
-        quality_text = quality_gates.read_text(encoding="utf-8")
-        if 'shellcheck -x "${shell_files[@]}"' not in quality_text:
-            errors.append("quality-gates.yml: deployment shell assets must run ShellCheck")
-        if "joysong-server/deploy/host/joysong-release-dispatch" not in quality_text:
-            errors.append("quality-gates.yml: ShellCheck must include the extensionless release dispatcher")
-    required = [
+
+def validate_pr_runners(
+    workflow_paths: list[Path], workflow_texts: dict[Path, str], errors: list[str]
+) -> None:
+    for path in workflow_paths:
+        text = workflow_texts[path]
+        if not re.search(r"^  pull_request(?:_target)?:\s*$", text, re.MULTILINE):
+            continue
+        for runner in RUNS_ON.findall(text):
+            if runner not in HOSTED_RUNNERS:
+                errors.append(
+                    f"{path.relative_to(ROOT)}: pull request workflows may only use "
+                    f"GitHub-hosted runners, got {runner or '<mapping/expression>'}"
+                )
+
+
+def validate_quality_gates(path: Path, text: str, errors: list[str]) -> None:
+    require_snippets(
+        path,
+        text,
+        (
+            "pull_request:\n    branches: [master]",
+            "push:\n    branches: [master]",
+            "name: Required quality gates",
+            "python3 joysong-server/deploy/ci/validate-workflows.py",
+            "python3 -m unittest discover -s joysong-server/deploy/tests -p 'test_*.py'",
+            "joysong-server/deploy/host/joysong-uat-deploy",
+            "shellcheck -x",
+            "joysong-server/deploy/ci/run-actionlint.sh",
+            "aquasecurity/trivy-action@",
+            "format: cyclonedx",
+        ),
+        errors,
+    )
+    if text.count("name: Required quality gates") != 1:
+        errors.append(
+            f"{path.relative_to(ROOT)}: terminal job name must occur exactly once"
+        )
+    if re.search(r"\b(?:main|default_branch)\b", text):
+        errors.append(
+            f"{path.relative_to(ROOT)}: active quality gates must target master explicitly"
+        )
+    if re.search(r"\b(?:flutter|android|ios|apk)\b", text, re.IGNORECASE):
+        errors.append(
+            f"{path.relative_to(ROOT)}: current quality gates must not build mobile clients"
+        )
+
+    jobs = extract_jobs(path, text, errors)
+    expected_jobs = {
+        "changes",
+        "backend",
+        "backend-mysql",
+        "admin",
+        "infrastructure",
+        "security",
+        "quality-gates",
+    }
+    if set(jobs) != expected_jobs:
+        errors.append(
+            f"{path.relative_to(ROOT)}: expected jobs {sorted(expected_jobs)}, "
+            f"got {sorted(jobs)}"
+        )
+    for job_name in expected_jobs:
+        require_runner(path, jobs, job_name, "ubuntu-latest", errors)
+
+
+def validate_uat_candidate(path: Path, text: str, errors: list[str]) -> None:
+    require_snippets(
+        path,
+        text,
+        (
+            "tags:\n      - 'v*.*.*-uat.*'",
+            "group: uat-deployment",
+            "cancel-in-progress: false",
+            '[[ "$GITHUB_RUN_ATTEMPT" == "1" ]]',
+            "--jq .visibility",
+            "refs/heads/master:refs/remotes/origin/master",
+            "git merge-base --is-ancestor",
+            "actions/workflows/uat-candidate.yml/runs?event=push&per_page=100",
+            "historical_tag_runs",
+            "actions/workflows/quality-gates.yml/runs?branch=master&event=push&head_sha=",
+            '.name == "Required quality gates"',
+            "--run-id \"$GITHUB_RUN_ID\"",
+            "actions/runs/$RUN_ID/artifacts?per_page=100",
+            "actions/artifacts/$artifact_id/zip",
+            "incoming_root=/var/lib/joysong-deploy/incoming",
+            "/usr/local/sbin/joysong-uat-deploy",
+            "UAT Candidate 已部署，公网未 Ready",
+            "Create or update private Draft Release",
+            "Create or update backend and admin acceptance issue",
+        ),
+        errors,
+    )
+    if "workflow_dispatch:" in text:
+        errors.append(
+            f"{path.relative_to(ROOT)}: UAT deployment must be triggered only by a new tag"
+        )
+    forbidden = (
+        r"\bALIYUN_",
+        r"\bid-token\b",
+        r"cloud-assistant",
+        r"publish-and-deploy",
+        r"\b(?:flutter|android|ios|apk)\b",
+        r"joysong@uat",
+        r"\b8081\b",
+        r"\bself-hosted\b",
+    )
+    for pattern in forbidden:
+        if re.search(pattern, text, re.IGNORECASE):
+            errors.append(
+                f"{path.relative_to(ROOT)}: forbidden legacy UAT contract matched: {pattern}"
+            )
+
+    jobs = extract_jobs(path, text, errors)
+    expected_jobs = {"preflight", "build", "deploy", "publish"}
+    if set(jobs) != expected_jobs:
+        errors.append(
+            f"{path.relative_to(ROOT)}: expected jobs {sorted(expected_jobs)}, "
+            f"got {sorted(jobs)}"
+        )
+    require_runner(path, jobs, "preflight", "ubuntu-latest", errors)
+    require_runner(path, jobs, "build", "ubuntu-latest", errors)
+    require_runner(path, jobs, "deploy", "joysong-uat-deploy", errors)
+    require_runner(path, jobs, "publish", "ubuntu-latest", errors)
+
+    deploy = jobs.get("deploy", "")
+    publish = jobs.get("publish", "")
+    if USES.search(deploy):
+        errors.append(
+            f"{path.relative_to(ROOT)}: self-hosted deploy job must not execute actions"
+        )
+    require_snippets(
+        path,
+        deploy,
+        (
+            "permissions:\n      actions: read\n      contents: read",
+            "/usr/bin/curl",
+            "/usr/bin/python3",
+            "/usr/bin/sudo -n /usr/local/sbin/joysong-uat-deploy",
+            'preflight "$TAG" "$COMMIT" "$RUN_ID" "$EXPECTED_SHA256"',
+            'deploy "$TAG" "$COMMIT" "$RUN_ID" "$EXPECTED_SHA256"',
+        ),
+        errors,
+    )
+    if any(
+        re.search(pattern, deploy, re.IGNORECASE | re.MULTILINE)
+        for pattern in (
+            r"^\s+[A-Za-z-]+:\s*write\s*$",
+            r"actions/checkout@",
+            r"\$\{\{\s*secrets\.",
+            r"^\s*(?:/usr/bin/)?jq(?:\s|$)",
+        )
+    ):
+        errors.append(
+            f"{path.relative_to(ROOT)}: self-hosted deploy job has expanded permissions or code access"
+        )
+    require_snippets(
+        path,
+        publish,
+        (
+            "needs: [build, deploy]",
+            "permissions:\n      actions: read\n      contents: write\n      issues: write",
+            "actions/download-artifact@",
+            "gh release",
+            "gh issue",
+        ),
+        errors,
+    )
+
+    if text.count("actions/upload-artifact@") != 1:
+        errors.append(
+            f"{path.relative_to(ROOT)}: build must upload exactly one workflow Artifact"
+        )
+    if text.count("runs-on: joysong-uat-deploy") != 1:
+        errors.append(
+            f"{path.relative_to(ROOT)}: exactly one job may target the UAT runner"
+        )
+
+
+def validate_acceptance_template(path: Path, text: str, errors: list[str]) -> None:
+    require_snippets(
+        path,
+        text,
+        (
+            "UAT Candidate 已部署，公网未 Ready",
+            "Backend acceptance",
+            "Admin acceptance",
+            "`current`",
+            "`previous`",
+            "backups",
+            "Flyway",
+            "B33 + V34…V40",
+            "127.0.0.1:8080",
+            "rollback",
+        ),
+        errors,
+    )
+    if re.search(
+        r"\b(?:flutter|android|ios|apk|mobile|promote|promotion)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        errors.append(
+            f"{path.relative_to(ROOT)}: acceptance must cover only the current backend and admin UAT path"
+        )
+
+
+def validate_python(errors: list[str]) -> int:
+    python_paths = sorted((ROOT / "joysong-server" / "deploy").rglob("*.py"))
+    for path in python_paths:
+        try:
+            ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, SyntaxError) as error:
+            errors.append(
+                f"{path.relative_to(ROOT)}: invalid deployment Python source: {error}"
+            )
+    return len(python_paths)
+
+
+def main() -> None:
+    errors: list[str] = []
+    acceptance_path = ROOT / ".github/ISSUE_TEMPLATE/uat-acceptance.yml"
+    required_assets = (
         ROOT / ".github/workflows/quality-gates.yml",
         ROOT / ".github/workflows/uat-candidate.yml",
+        acceptance_path,
+        ROOT / "docs/guide/deployment/README.md",
+        ROOT / "docs/guide/deployment/CONFIGURATION_REFERENCE.md",
+        ROOT / "design/ALIYUN_CICD_DEPLOYMENT.puml",
+        ROOT / "joysong-server/deploy/README.md",
+        ROOT / "joysong-server/deploy/ci/package-release.py",
+        ROOT / "joysong-server/deploy/ci/run-actionlint.sh",
+        ROOT / "joysong-server/deploy/host/bootstrap-uat-host.sh",
+        ROOT / "joysong-server/deploy/host/joysong-uat-deploy",
+        ROOT / "joysong-server/deploy/host/verify-uat-release.py",
+        ROOT / "joysong-server/deploy/nginx/joysong-public.conf",
+        ROOT / "joysong-server/deploy/systemd/joysong-demo.service",
+        ROOT / "joysong-server/deploy/tests/test_bootstrap_ubuntu.py",
+        ROOT / "joysong-server/deploy/tests/test_package_release.py",
+        ROOT / "joysong-server/deploy/tests/test_joysong_uat_deploy.py",
+        ROOT / "joysong-server/deploy/tests/test_release_cross_contract.py",
+    )
+    for path in required_assets:
+        read_required(path, errors)
+
+    for retired in (
         ROOT / ".github/workflows/uat-promote.yml",
         ROOT / ".github/workflows/uat-rollback.yml",
-        ROOT / ".github/workflows/prod-deploy.yml",
-        ROOT / ".github/ISSUE_TEMPLATE/uat-acceptance.yml",
-        ROOT / "docs/guide/deployment/README.md",
-        ROOT / "docs/guide/deployment/CONFIGURATION_REFERENCE.md",
-        ROOT / "joysong-server/deploy/ci/package-release.py",
-        ROOT / "joysong-server/deploy/ci/publish-and-deploy.sh",
-        ROOT / "joysong-server/deploy/ci/verify-uat-acceptance.sh",
-        ROOT / "joysong-server/deploy/host/deploy-release.sh",
-        ROOT / "joysong-server/deploy/host/joysong-release-dispatch",
-        ROOT / "joysong-server/deploy/host/backup-runtime-state.sh",
-        ROOT / "joysong-server/deploy/host/baseline-data-manifest.py",
-        ROOT / "joysong-server/deploy/host/restore-uat-backup-to-new-db.sh",
-        ROOT / "joysong-server/deploy/host/capture-existing-uat-baseline.sh",
-        ROOT / "joysong-server/deploy/host/finalize-uat-cutover.sh",
-        ROOT / "joysong-server/deploy/host/validate-runtime-config.sh",
-        ROOT / "joysong-server/deploy/systemd/joysong@.service",
-        ROOT / "joysong-server/deploy/nginx/joysong-uat.conf",
-        ROOT / "joysong-server/deploy/nginx/joysong-uat-upstream.conf",
-        ROOT / "joysong-server/deploy/nginx/joysong-uat-subdomains.conf",
-        ROOT / "joysong-server/deploy/nginx/joysong-default-deny.conf",
-    ]
-    for path in required:
-        if not path.is_file():
-            errors.append(f"missing deployment asset: {path.relative_to(ROOT)}")
-
-    bootstrap_script = ROOT / "joysong-server/deploy/host/bootstrap-host.sh"
-    if bootstrap_script.is_file():
-        bootstrap_text = bootstrap_script.read_text(encoding="utf-8")
-        helper_install = (
-            'install -o root -g root -m 0755 "$deploy_root/host/baseline-data-manifest.py" '
-            '/usr/local/lib/joysong/baseline-data-manifest.py'
-        )
-        if helper_install not in bootstrap_text:
-            errors.append("bootstrap must install the root-owned baseline data manifest helper")
-
-    capture_script = ROOT / "joysong-server/deploy/host/capture-existing-uat-baseline.sh"
-    if capture_script.is_file():
-        capture_text = capture_script.read_text(encoding="utf-8")
-        capture_contract = (
-            '(($# == 8))',
-            'old_admin="$(readlink -f -- "$old_admin")"',
-            '${admin_commit:0:8}',
-            '"baselineSourceCommits"',
-            'BASELINE_SERVER_COMMIT=$server_commit',
-            'BASELINE_ADMIN_COMMIT=$admin_commit',
-            'OLD_ADMIN=$old_admin',
-            'OLD_ADMIN_COMMIT=$admin_commit',
-            'def read_environment(path_value, allow_legacy_lines=False):',
-            'previous_assignment_key = None',
-            '5bf8aa57fc5a6bc547decf1cc6db63f10deb55a3c6c5df497d631fb3d95e1abf',
-            '733e034005783808dcc93b5c3683e47cd536f7d3cc6c1141dae9742304cd7069',
-            'provenance = (previous_assignment_key, line_sha256)',
-            'provenance in seen_lines',
-            'seen_lines.add(provenance)',
-            'old_values, ignored_old_lines = read_environment(sys.argv[1], allow_legacy_lines=True)',
-            'new_values, ignored_new_lines = read_environment(sys.argv[2])',
-            'normalized_old_lines = sorted(ignored_old_lines)',
-            'OLD_ENV_IGNORED_LINE_COUNT=$old_env_ignored_line_count',
-            'OLD_ENV_IGNORED_LINE_SHA256=$old_env_ignored_line_sha256',
-            'data_manifest="$backup_root/DATA_MANIFEST.jsonl"',
-            '"$data_manifest_helper" check "$old_uploads"',
-            '"$data_manifest_helper" create "$backup_root/data" "$data_manifest"',
-            'old-service.txt old-service-status.txt nginx.txt data-migration.txt DATA_MANIFEST.jsonl',
-            'DATA_MANIFEST_SHA256=$data_manifest_sha256',
-            'DATA_MANIFEST_PATH=$data_manifest',
-        )
-        for mention in capture_contract:
-            if mention not in capture_text:
-                errors.append(f"baseline capture provenance contract is missing: {mention}")
-
-    manifest_helper = ROOT / "joysong-server/deploy/host/baseline-data-manifest.py"
-    if manifest_helper.is_file():
-        helper_text = manifest_helper.read_text(encoding="utf-8")
-        helper_contract = (
-            'sys.argv[1] not in ("check", "create", "verify")',
-            'getattr(os, "geteuid", lambda: 1)() != 0',
-            'os.listdir(directory_descriptor)',
-            'follow_symlinks=False',
-            'entry_stat.st_dev != root_device',
-            'entry_stat.st_nlink != 1',
-            'base64.b64encode(relative_path).decode("ascii")',
-            'records.sort(key=lambda item: item[0])',
-            'baseline data changed between manifest scans',
-            'baseline data manifest target must not exist',
-            'os.fchown(descriptor, 0, 0)',
-            'os.fchmod(descriptor, 0o600)',
-            'os.fsync(stream.fileno())',
-            'os.link(stage, manifest_path, follow_symlinks=False)',
-            'baseline data manifest must be a root:root mode 0600 regular non-link file',
-            'baseline data manifest does not match both rebuilt scans',
-        )
-        for mention in helper_contract:
-            if mention not in helper_text:
-                errors.append(f"baseline data manifest helper contract is missing: {mention}")
-        try:
-            compile(helper_text, str(manifest_helper), "exec")
-        except SyntaxError as error:
-            errors.append(f"baseline data manifest helper has invalid Python syntax: {error}")
-
-    finalize_script = ROOT / "joysong-server/deploy/host/finalize-uat-cutover.sh"
-    if finalize_script.is_file():
-        finalize_text = finalize_script.read_text(encoding="utf-8")
-        finalize_contract = (
-            '"$(stat -c \'%U:%G:%a\' "$baseline_marker" 2>/dev/null || true)" != "root:root:600"',
-            'baseline BACKUP_ROOT must be one direct child of the canonical backup parent',
-            'baseline_checksum_names=(',
-            'if len(expected_names) != 13:',
-            'baseline SHA256SUMS must contain exactly 13 entries',
-            'def read_root_only(path_value, label, capture_content=False):',
-            'chunks = [] if capture_content else None',
-            'checksum_content, _ = read_root_only(checksum_path, "baseline SHA256SUMS", capture_content=True)',
-            '"$data_manifest_helper" verify "$baseline_backup_root/data" "$baseline_data_manifest_path"',
-            'def read_environment(path_value, allow_legacy_lines=False):',
-            'old_values, ignored_old_lines = read_environment(sys.argv[1], allow_legacy_lines=True)',
-            'new_values, ignored_new_lines = read_environment(sys.argv[2])',
-            'baseline_old_env_ignored_line_count="$(read_baseline_value OLD_ENV_IGNORED_LINE_COUNT)"',
-            'baseline_old_env_ignored_line_sha256="$(read_baseline_value OLD_ENV_IGNORED_LINE_SHA256)"',
-            'current_old_env_ignored_line_count current_old_env_ignored_line_sha256',
-        )
-        for mention in finalize_contract:
-            if mention not in finalize_text:
-                errors.append(f"final cutover baseline-integrity contract is missing: {mention}")
-        if finalize_text.count("check_old_live_data_roots") < 4:
-            errors.append("final cutover must check live data before stop, after freeze and before final rsync")
-        verify_index = finalize_text.find('"$data_manifest_helper" verify')
-        maintenance_index = finalize_text.find('install -o root -g root -m 0600 /dev/null "$maintenance_file"')
-        if verify_index < 0 or maintenance_index < 0 or verify_index > maintenance_index:
-            errors.append("final cutover must verify the baseline manifest before entering maintenance")
-
-    deploy_script = ROOT / "joysong-server/deploy/host/deploy-release.sh"
-    if deploy_script.is_file():
-        deploy_text = deploy_script.read_text(encoding="utf-8")
-        deploy_contract = (
-            'baseline_source_commits = data.get("baselineSourceCommits")',
-            'if tag == "v0.0.0-uat.0":',
-            'release_identity.get("baselineSourceCommits") != baseline_source_commits',
-        )
-        for mention in deploy_contract:
-            if mention not in deploy_text:
-                errors.append(f"stored baseline provenance validation is missing: {mention}")
-
-    legacy_names = (
-        "CONFIGURATION_GUIDE.md",
-        "ALIYUN_DEMO_DEPLOYMENT_GUIDE.md",
-        "CLOUD_DEPLOYMENT_GUIDE.md",
-    )
-    for name in legacy_names:
-        legacy_path = ROOT / "docs/guide" / name
-        if legacy_path.exists():
-            errors.append(f"legacy deployment guide must be removed: {legacy_path.relative_to(ROOT)}")
-    for path in (ROOT / "docs").rglob("*.md"):
-        text = path.read_text(encoding="utf-8")
-        for name in legacy_names:
-            if name in text:
-                errors.append(f"{path.relative_to(ROOT)}: references retired deployment guide {name}")
-
-    link_documents = (
-        ROOT / "docs/guide/deployment/README.md",
-        ROOT / "docs/guide/deployment/CONFIGURATION_REFERENCE.md",
-        ROOT / "joysong-server/deploy/README.md",
-    )
-    for path in link_documents:
-        if not path.is_file():
-            continue
-        for match in MARKDOWN_LINK.finditer(path.read_text(encoding="utf-8")):
-            target = match.group(1).strip().split("#", 1)[0]
-            if not target or re.match(r"^(?:https?://|mailto:)", target):
-                continue
-            if target.startswith("<") and target.endswith(">"):
-                target = target[1:-1]
-            resolved = (path.parent / target).resolve()
-            try:
-                resolved.relative_to(ROOT.resolve())
-            except ValueError:
-                errors.append(f"{path.relative_to(ROOT)}: link escapes repository: {target}")
-                continue
-            if not resolved.exists():
-                errors.append(f"{path.relative_to(ROOT)}: broken relative link: {target}")
-
-    canonical = ROOT / "docs/guide/deployment/README.md"
-    configuration_reference = ROOT / "docs/guide/deployment/CONFIGURATION_REFERENCE.md"
-    if canonical.is_file():
-        canonical_text = canonical.read_text(encoding="utf-8")
-        required_mentions = [
-            ".github/workflows/quality-gates.yml",
-            ".github/workflows/uat-candidate.yml",
-            ".github/workflows/uat-promote.yml",
-            ".github/workflows/uat-rollback.yml",
-            ".github/workflows/prod-deploy.yml",
-            ".github/ISSUE_TEMPLATE/uat-acceptance.yml",
-            "joysong-server/deploy/",
-        ]
-        for mention in required_mentions:
-            if mention not in canonical_text:
-                errors.append(f"canonical deployment guide does not mention executable asset: {mention}")
-    if configuration_reference.is_file():
-        configuration_text = configuration_reference.read_text(encoding="utf-8")
-        referenced_configuration = set()
-        for workflow_path in workflow_paths:
-            workflow_text = workflow_path.read_text(encoding="utf-8")
-            referenced_configuration.update(
-                re.findall(r"\b(?:vars|secrets)\.([A-Z][A-Z0-9_]*)", workflow_text)
+    ):
+        if retired.exists():
+            errors.append(
+                f"retired UAT workflow must be removed: {retired.relative_to(ROOT)}"
             )
-        for name in sorted(referenced_configuration):
-            if name not in configuration_text:
-                errors.append(
-                    f"canonical configuration reference does not define workflow setting: {name}"
-                )
+
+    workflow_paths = sorted(
+        {
+            *WORKFLOWS.glob("*.yml"),
+            *WORKFLOWS.glob("*.yaml"),
+        }
+    )
+    if not workflow_paths:
+        errors.append("no workflows found")
+    workflow_texts = {
+        path: path.read_text(encoding="utf-8") for path in workflow_paths
+    }
+    validate_action_pins(workflow_paths, workflow_texts, errors)
+    validate_pr_runners(workflow_paths, workflow_texts, errors)
+
+    quality_path = ROOT / ".github/workflows/quality-gates.yml"
+    candidate_path = ROOT / ".github/workflows/uat-candidate.yml"
+    quality_text = workflow_texts.get(quality_path, "")
+    candidate_text = workflow_texts.get(candidate_path, "")
+    if quality_text:
+        validate_quality_gates(quality_path, quality_text, errors)
+    if candidate_text:
+        validate_uat_candidate(candidate_path, candidate_text, errors)
+        validate_release_cross_contract(
+            ROOT / "joysong-server/deploy/ci/package-release.py",
+            ROOT / "joysong-server/deploy/host/verify-uat-release.py",
+            ROOT / "joysong-server/deploy/host/joysong-uat-deploy",
+            candidate_path,
+            candidate_text,
+            errors,
+        )
+    if acceptance_path.is_file():
+        validate_acceptance_template(
+            acceptance_path,
+            acceptance_path.read_text(encoding="utf-8"),
+            errors,
+        )
+
+    for path, text in workflow_texts.items():
+        if path != candidate_path and re.search(
+            r"^\s+runs-on:\s*joysong-uat-deploy\s*$", text, re.MULTILINE
+        ):
+            errors.append(
+                f"{path.relative_to(ROOT)}: UAT runner label is exclusive to uat-candidate.yml"
+            )
+
+    python_count = validate_python(errors)
     if errors:
         raise SystemExit("\n".join(errors))
-    print(f"Validated {len(workflow_paths)} workflows and {len(required)} deployment assets.")
+    print(
+        f"Validated {len(workflow_paths)} workflows, fast UAT runner isolation, "
+        f"and {python_count} deployment Python files."
+    )
 
 
 if __name__ == "__main__":
