@@ -133,7 +133,7 @@ jobs:
         run: |
           npm ci
           npm run lint
-          npm test
+          npm test -- --maxWorkers=2 --fileParallelism=false
           npm run build
 
   infrastructure:
