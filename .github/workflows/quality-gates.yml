@@ -182,7 +182,7 @@ jobs:
           scanners: vuln,secret,misconfig
           severity: HIGH,CRITICAL
           ignore-unfixed: false
-          exit-code: '1'
+          exit-code: '0'
           format: json
           output: quality-scan-report.json
           version: v0.74.0
@@ -203,6 +203,17 @@ jobs:
             quality-sbom.cdx.json
           if-no-files-found: error
           retention-days: 14
+      - name: Enforce empty high-severity security report
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          findings="$(jq '[.Results[]? | ((.Vulnerabilities // [])[]?, (.Misconfigurations // [])[]?, (.Secrets // [])[]?)] | length' quality-scan-report.json)"
+          [[ "$findings" =~ ^[0-9]+$ ]]
+          if ((findings > 0)); then
+            jq -r '.Results[]? as $result | ((.Vulnerabilities // [])[]?, (.Misconfigurations // [])[]?, (.Secrets // [])[]?) | [$result.Target, (.VulnerabilityID // .ID // .RuleID // "unknown"), (.Severity // "UNKNOWN")] | @tsv' quality-scan-report.json
+            echo "Security gate found $findings high/critical vulnerability, secret or misconfiguration result(s)." >&2
+            exit 1
+          fi
 
   quality-gates:
     name: Required quality gates

@@ -30,7 +30,8 @@ if [[ -n "${JOYSONG_UAT_BOOTSTRAP_TEST_ROOT:-}" ]]; then
     fail "test root override is forbidden for root or outside the test harness"
   readonly ROOT_PREFIX="${JOYSONG_UAT_BOOTSTRAP_TEST_ROOT%/}"
   readonly TEST_MODE=true
-  readonly PYTHON_BIN="$(command -v python)"
+  PYTHON_BIN="$(command -v python)"
+  readonly PYTHON_BIN
 else
   [[ "$EUID" -eq 0 ]] || fail "run as root"
   readonly PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -43,23 +44,26 @@ fi
 
 host_path() { printf '%s%s' "$ROOT_PREFIX" "$1"; }
 
-readonly ENV_DIR="$(host_path /etc/joysong-demo)"
+ENV_DIR="$(host_path /etc/joysong-demo)"
+readonly ENV_DIR
 readonly ENV_FILE="$ENV_DIR/joysong.env"
 readonly HOST_CONTRACT="$ENV_DIR/host-contract"
-readonly MYSQL_CONFIG="$(host_path /etc/mysql/joysong-uat-backup.cnf)"
-readonly SYSTEMD_UNIT="$(host_path /etc/systemd/system/$APP_SERVICE)"
-readonly RUNNER_UNIT="$(host_path /etc/systemd/system/$RUNNER_SERVICE)"
-readonly NGINX_SITE="$(host_path /etc/nginx/conf.d/joysong-public.conf)"
-readonly NGINX_DEFAULT="$(host_path /etc/nginx/sites-enabled/default)"
-readonly INSTALL_ROOT="$(host_path /usr/local/lib/joysong-deploy)"
-readonly ENTRYPOINT="$(host_path /usr/local/sbin/joysong-uat-deploy)"
-readonly SUDOERS="$(host_path /etc/sudoers.d/joysong-uat-deploy)"
-readonly BACKEND_ROOT="$(host_path /opt/joysong-demo)"
-readonly ADMIN_ROOT="$(host_path /var/www/joysong-demo)"
-readonly DATA_ROOT="$(host_path /var/lib/joysong-demo)"
-readonly DEPLOY_ROOT="$(host_path /var/lib/joysong-deploy)"
-readonly RUNNER_HOME_PATH="$(host_path "$RUNNER_HOME")"
-readonly RUNNER_ROOT_PATH="$(host_path "$RUNNER_ROOT")"
+MYSQL_CONFIG="$(host_path /etc/mysql/joysong-uat-backup.cnf)"
+SYSTEMD_UNIT="$(host_path "/etc/systemd/system/$APP_SERVICE")"
+RUNNER_UNIT="$(host_path "/etc/systemd/system/$RUNNER_SERVICE")"
+NGINX_SITE="$(host_path /etc/nginx/conf.d/joysong-public.conf)"
+NGINX_DEFAULT="$(host_path /etc/nginx/sites-enabled/default)"
+INSTALL_ROOT="$(host_path /usr/local/lib/joysong-deploy)"
+ENTRYPOINT="$(host_path /usr/local/sbin/joysong-uat-deploy)"
+SUDOERS="$(host_path /etc/sudoers.d/joysong-uat-deploy)"
+BACKEND_ROOT="$(host_path /opt/joysong-demo)"
+ADMIN_ROOT="$(host_path /var/www/joysong-demo)"
+DATA_ROOT="$(host_path /var/lib/joysong-demo)"
+DEPLOY_ROOT="$(host_path /var/lib/joysong-deploy)"
+RUNNER_HOME_PATH="$(host_path "$RUNNER_HOME")"
+RUNNER_ROOT_PATH="$(host_path "$RUNNER_ROOT")"
+readonly MYSQL_CONFIG SYSTEMD_UNIT RUNNER_UNIT NGINX_SITE NGINX_DEFAULT INSTALL_ROOT ENTRYPOINT
+readonly SUDOERS BACKEND_ROOT ADMIN_ROOT DATA_ROOT DEPLOY_ROOT RUNNER_HOME_PATH RUNNER_ROOT_PATH
 
 mode_not_writable_by_group_or_other() {
   local mode="$1"
@@ -128,7 +132,7 @@ install_file() {
 user_exists() {
   local user="$1"
   if [[ "$TEST_MODE" == true ]]; then
-    [[ -f "$(host_path /run/joysong-bootstrap-users/$user)" ]]
+    [[ -f "$(host_path "/run/joysong-bootstrap-users/$user")" ]]
   else
     getent passwd "$user" >/dev/null
   fi
@@ -146,7 +150,7 @@ ensure_system_user() {
     return
   fi
   if [[ "$TEST_MODE" == true ]]; then
-    marker="$(host_path /run/joysong-bootstrap-users/$user)"
+    marker="$(host_path "/run/joysong-bootstrap-users/$user")"
     install_directory root root 0700 "$(dirname "$marker")"
     printf 'home=%s\nshell=/usr/sbin/nologin\n' "$home" >"$marker"
     chmod 0600 "$marker"
@@ -211,7 +215,10 @@ port_is_free() {
   if [[ "$TEST_MODE" == true ]]; then
     [[ ! -e "$(host_path "/run/joysong-bootstrap-port-$port-busy")" ]]
   else
-    ! ss -H -ltn "sport = :$port" | grep -q .
+    if ss -H -ltn "sport = :$port" | grep -q .; then
+      return 1
+    fi
+    return 0
   fi
 }
 
@@ -577,7 +584,7 @@ extract_and_register_runner() {
   registration_token="$(tr -d '\r\n' <"$token_file")"
   [[ "${#registration_token}" -ge 20 && "${#registration_token}" -le 255 && "$registration_token" != *[[:space:]]* ]] || fail "registration token file is malformed"
   if [[ "$TEST_MODE" == true ]]; then
-    actual_version="$($RUNNER_ROOT_PATH/bin/Runner.Listener --version)"
+    actual_version="$("$RUNNER_ROOT_PATH/bin/Runner.Listener" --version)"
     (cd "$RUNNER_ROOT_PATH" && ./config.sh --unattended --url "$REPOSITORY_URL" --token "$registration_token" \
       --name "$RUNNER_NAME" --labels "$RUNNER_LABEL" --no-default-labels --work "$RUNNER_HOME")
   else

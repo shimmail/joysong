@@ -54,24 +54,28 @@ fi
 
 host_path() { printf '%s%s' "$PATH_PREFIX" "$1"; }
 
-readonly BACKEND_ROOT="$(host_path /opt/joysong-demo)"
+BACKEND_ROOT="$(host_path /opt/joysong-demo)"
+readonly BACKEND_ROOT
 readonly BACKEND_RELEASES="$BACKEND_ROOT/releases"
 readonly BACKEND_CURRENT="$BACKEND_ROOT/current"
 readonly BACKEND_PREVIOUS="$BACKEND_ROOT/previous"
-readonly ADMIN_ROOT="$(host_path /var/www/joysong-demo)"
+ADMIN_ROOT="$(host_path /var/www/joysong-demo)"
+readonly ADMIN_ROOT
 readonly ADMIN_RELEASES="$ADMIN_ROOT/releases"
 readonly ADMIN_CURRENT="$ADMIN_ROOT/current"
 readonly ADMIN_PREVIOUS="$ADMIN_ROOT/previous"
-readonly DATA_ROOT="$(host_path /var/lib/joysong-demo)"
+DATA_ROOT="$(host_path /var/lib/joysong-demo)"
+readonly DATA_ROOT
 readonly UPLOADS="$DATA_ROOT/uploads"
 readonly PRIVATE_DATA="$DATA_ROOT/private"
 readonly STAGING_DATA="$DATA_ROOT/upload-staging"
-readonly CONFIG_FILE="$(host_path /etc/joysong-demo/joysong.env)"
-readonly MYSQL_CONFIG="$(host_path /etc/mysql/joysong-uat-backup.cnf)"
-readonly NGINX_SITE="$(host_path /etc/nginx/conf.d/joysong-public.conf)"
-readonly SYSTEMD_UNIT="$(host_path /etc/systemd/system/joysong-demo.service)"
-readonly HOST_CONTRACT="$(host_path /etc/joysong-demo/host-contract)"
-readonly DEPLOY_ROOT="$(host_path /var/lib/joysong-deploy)"
+CONFIG_FILE="$(host_path /etc/joysong-demo/joysong.env)"
+MYSQL_CONFIG="$(host_path /etc/mysql/joysong-uat-backup.cnf)"
+NGINX_SITE="$(host_path /etc/nginx/conf.d/joysong-public.conf)"
+SYSTEMD_UNIT="$(host_path /etc/systemd/system/joysong-demo.service)"
+HOST_CONTRACT="$(host_path /etc/joysong-demo/host-contract)"
+DEPLOY_ROOT="$(host_path /var/lib/joysong-deploy)"
+readonly CONFIG_FILE MYSQL_CONFIG NGINX_SITE SYSTEMD_UNIT HOST_CONTRACT DEPLOY_ROOT
 readonly STATE_ROOT="$DEPLOY_ROOT/state"
 readonly BACKUP_ROOT="$DEPLOY_ROOT/backups"
 readonly INCOMING_ROOT="$DEPLOY_ROOT/incoming"
@@ -79,7 +83,8 @@ readonly LOCK_FILE="$STATE_ROOT/deploy.lock"
 readonly TRANSACTION_MARKER="$STATE_ROOT/transaction"
 readonly PREVIOUS_IDENTITY="$STATE_ROOT/previous-pair"
 readonly LEGACY_ADOPTION_PENDING="$STATE_ROOT/legacy-backend-adoption.pending"
-readonly VERIFY_TOOL="$(host_path /usr/local/lib/joysong-deploy/verify-uat-release.py)"
+VERIFY_TOOL="$(host_path /usr/local/lib/joysong-deploy/verify-uat-release.py)"
+readonly VERIFY_TOOL
 
 TAG_RE='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-uat\.(0|[1-9][0-9]*)$'
 SHA64_RE='^[0-9a-f]{64}$'
@@ -94,7 +99,7 @@ validate_arguments() {
   [[ "$3" =~ $COMMIT_RE ]] || fail "commit must be 40 lowercase hexadecimal characters"
   [[ "$4" =~ $RUN_ID_RE ]] || fail "run ID must be a positive decimal integer"
   if ((${#4} == 19)); then
-    [[ "$4" < "$RUN_ID_MAX" || "$4" == "$RUN_ID_MAX" ]] || fail "run ID exceeds signed 64-bit range"
+    ((10#$4 <= RUN_ID_MAX)) || fail "run ID exceeds signed 64-bit range"
   fi
   [[ "$5" =~ $SHA64_RE ]] || fail "bundle SHA-256 must be 64 lowercase hexadecimal characters"
 }
@@ -664,7 +669,7 @@ database_metrics() {
 }
 
 verify_capacity_and_backup_readiness() {
-  local metrics database_bytes non_innodb events data_bytes candidate_bytes backend_bytes admin_bytes
+  local database_bytes non_innodb events data_bytes candidate_bytes backend_bytes admin_bytes
   local backup_available backend_available admin_available backup_required backend_required admin_required
   local -a values
   mapfile -t values < <(database_metrics)
@@ -694,7 +699,9 @@ verify_capacity_and_backup_readiness() {
 }
 
 install_candidate() {
-  local tag="$1" backend_stage="$BACKEND_RELEASES/.${tag}.stage.$$" admin_stage="$ADMIN_RELEASES/.${tag}.stage.$$"
+  local tag="$1" backend_stage admin_stage
+  backend_stage="$BACKEND_RELEASES/.${tag}.stage.$$"
+  admin_stage="$ADMIN_RELEASES/.${tag}.stage.$$"
   [[ ! -e "$backend_stage" && ! -e "$admin_stage" ]] || fail "candidate staging path already exists"
   install -d -m 0755 "$backend_stage" "$admin_stage"
   install -m 0444 "$CANDIDATE_ROOT/joysong-server.jar" "$backend_stage/joysong-server.jar"

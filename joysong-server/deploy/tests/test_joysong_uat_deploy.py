@@ -405,11 +405,15 @@ class JoySongUatDeployContractTest(unittest.TestCase):
     def test_ubuntu_contract_uses_bootstrap_hashes_without_requiring_selinux(self):
         source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
         self.assertIn(
-            'readonly NGINX_SITE="$(host_path /etc/nginx/conf.d/joysong-public.conf)"',
+            'NGINX_SITE="$(host_path /etc/nginx/conf.d/joysong-public.conf)"',
             source,
         )
         self.assertIn(
-            'readonly HOST_CONTRACT="$(host_path /etc/joysong-demo/host-contract)"',
+            'HOST_CONTRACT="$(host_path /etc/joysong-demo/host-contract)"',
+            source,
+        )
+        self.assertIn(
+            "readonly CONFIG_FILE MYSQL_CONFIG NGINX_SITE SYSTEMD_UNIT HOST_CONTRACT DEPLOY_ROOT",
             source,
         )
         self.assertIn('read_assignment "$HOST_CONTRACT" SYSTEMD_UNIT_SHA256', source)
