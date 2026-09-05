@@ -1,30 +1,76 @@
-name: UAT acceptance checklist
-description: Reference checklist; the candidate workflow creates the authoritative issue with immutable tag and commit markers.
-title: "UAT acceptance: "
+name: UAT Candidate acceptance
+description: Reference checklist for the deployed Ubuntu backend and admin UAT candidate.
+title: "UAT Candidate 验收: "
 labels:
   - uat-awaiting-acceptance
 body:
   - type: markdown
     attributes:
       value: |
-        The `UAT candidate` workflow creates the authoritative acceptance issue.
-        Do not use a manually created issue for promotion: it lacks the workflow-owned tag and commit markers and will be rejected.
+        当前状态：`UAT Candidate 已部署，公网未 Ready`
+
+        权威验收 Issue 由 `UAT candidate` workflow 在部署成功后创建，并记录不可变的 tag、commit、run ID 和 Artifact SHA-256。
+        本清单必须区分首次 `fresh` 与后续 `existing` 发布；完成所有自动证据和人工业务检查前，不得声明全链路完成或切换公网流量。
   - type: checkboxes
-    id: checks
+    id: host-bootstrap
     attributes:
-      label: Business acceptance
+      label: Ubuntu host and runner
       options:
-        - label: Password login works with an existing test account.
+        - label: "The host identity is Ubuntu 24.04.4 LTS, x86_64 and systemd 255 on ECS i-bp19abm7697mvhl0xewu."
           required: true
-        - label: Fictional institutions, doctors, projects and content render correctly.
+        - label: "The stored host-contract matches the installed repository systemd and Nginx templates; Nginx runs as www-data."
           required: true
-        - label: AI chat and translation work.
+        - label: "Runner.Listener reports 2.337.0, the service is active, the GitHub API reports online, and joysong-uat-deploy is its only label."
           required: true
-        - label: OSS image upload and public retrieval work.
+        - label: "The Runner cannot read application/MySQL secrets, private, staging, deployment state or backups, and has no general root shell."
           required: true
-        - label: User-triggered simulated payment succeeds immediately.
+  - type: checkboxes
+    id: release-state
+    attributes:
+      label: Release state and rollback readiness
+      options:
+        - label: "The backend and admin `current` links resolve to the same release identity matching this issue's tag, commit and run ID."
           required: true
-        - label: Full refund succeeds after administrator approval.
+        - label: "For a fresh release, both `previous` links are absent; for an existing release, both resolve to one verified previous pair with recursive owner/mode/hash checks."
           required: true
-        - label: Installing over the previous UAT APK retains local data.
+        - label: "Database, configuration and required persistent-data backups exist, and their completion marker and recorded checksums have been verified."
+          required: true
+        - label: "No unresolved deployment transaction marker remains after a successful deployment."
+          required: true
+  - type: checkboxes
+    id: backend
+    attributes:
+      label: Backend acceptance
+      options:
+        - label: "`joysong-demo.service` is active and enabled, and its health check passes."
+          required: true
+        - label: "The new MainPID exclusively owns `127.0.0.1:8080` and runs the JAR bound to this release."
+          required: true
+        - label: "Database `myapp_worktree_uat` contains exactly the successful `B33 + V34…V40` Flyway baseline, with no failed or out-of-order migration."
+          required: true
+        - label: "`ADMIN_PASSWORD` has been atomically removed from the environment file and the controlled restart verification passes."
+          required: true
+        - label: "Login, AI chat, translation, payment and refund smoke tests pass against the Backend API."
+          required: true
+  - type: checkboxes
+    id: admin
+    attributes:
+      label: Admin acceptance
+      options:
+        - label: "Nginx serves the deployed admin current release as www-data, and its configuration hash did not change during the tag deployment."
+          required: true
+        - label: "Local Host-header checks for `/` and `/orders` resolve to the candidate index."
+          required: true
+        - label: "Admin login, core navigation and approval flows pass without console or network errors."
+          required: true
+  - type: checkboxes
+    id: completion
+    attributes:
+      label: Completion and public readiness hold
+      options:
+        - label: "The Draft Release, this Issue, Artifact SHA-256, Flyway snapshot, backup identity and host evidence all describe the same immutable release."
+          required: true
+        - label: "Security group, DNS, TLS, ECS role and both business Bucket ACLs/objects were not changed by this delivery."
+          required: true
+        - label: "Public-entry work remains separate; this candidate is still 公网未 Ready."
           required: true
