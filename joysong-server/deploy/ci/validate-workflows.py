@@ -607,6 +607,7 @@ def main() -> None:
     errors: list[str] = []
     acceptance_path = ROOT / ".github/ISSUE_TEMPLATE/uat-acceptance.yml"
     required_assets = (
+        ROOT / ".github/actionlint.yaml",
         ROOT / ".github/workflows/quality-gates.yml",
         ROOT / ".github/workflows/uat-candidate.yml",
         acceptance_path,
