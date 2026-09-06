@@ -839,7 +839,7 @@ def unique_object(pairs):
         result[key] = value
     return result
 try:
-    with open(path, encoding="utf-8") as stream:
+    with open(path, encoding="utf-8-sig") as stream:
         document = stream.read(65537)
     if len(document) > 65536:
         raise ValueError("oversized registration")

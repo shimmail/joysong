@@ -157,7 +157,8 @@ done
 [ "$disable_update" = true ]
 IFS= read -r token
 [ "$token" = not-a-real-registration-token-value ]
-printf '{"agentId":1,"agentName":"%s","gitHubUrl":"%s","workFolder":"%s","disableUpdate":true}\n' "$name" "$repository" "$work" >.runner
+printf '\357\273\277' >.runner
+printf '{"agentId":1,"agentName":"%s","gitHubUrl":"%s","workFolder":"%s","disableUpdate":true}\n' "$name" "$repository" "$work" >>.runner
 CONFIG
             cat >"$payload/runsvc.sh" <<'SERVICE'
 #!/bin/sh
