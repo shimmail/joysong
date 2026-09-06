@@ -113,6 +113,8 @@ DB_USERNAME=joysong_app
 DB_PASSWORD=not-a-real-db-password-value
 DEMO_DATABASE_NAME=myapp_worktree_uat
 JWT_SECRET=not-a-real-jwt-secret-value-000000
+ADMIN_PHONE=13800000000
+ADMIN_PASSWORD=not-a-real-admin-password-value
 ENV
             cat >"$secrets/joysong-uat-backup.cnf" <<'CNF'
 [client]
@@ -133,18 +135,29 @@ RUNNER
 #!/bin/sh
 set -eu
 label=''
+name=''
+repository=''
+work=''
 no_defaults=false
+disable_update=false
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --labels) shift; label="$1" ;;
+    --name) shift; name="$1" ;;
+    --url) shift; repository="$1" ;;
+    --work) shift; work="$1" ;;
     --no-default-labels) no_defaults=true ;;
-    --token) shift ;;
+    --disableupdate) disable_update=true ;;
+    --token|--unattended) exit 1 ;;
   esac
   shift
 done
 [ "$label" = joysong-uat-deploy ]
 [ "$no_defaults" = true ]
-: >.runner
+[ "$disable_update" = true ]
+IFS= read -r token
+[ "$token" = not-a-real-registration-token-value ]
+printf '{"agentId":1,"agentName":"%s","gitHubUrl":"%s","workFolder":"%s","disableUpdate":true}\n' "$name" "$repository" "$work" >.runner
 CONFIG
             cat >"$payload/runsvc.sh" <<'SERVICE'
 #!/bin/sh
@@ -221,6 +234,192 @@ SERVICE
             """
         )
 
+    def test_production_listener_inspection_accepts_only_verified_resolved_dns(self):
+        self.run_bash(
+            self.fixture_preamble()
+            + r"""
+            source <(sed '$d' "$bootstrap")
+            ss() { cat "$fixture/listeners"; }
+            systemctl() { printf '43\n'; }
+            executable=/usr/lib/systemd/systemd-resolved
+            readlink() { printf '%s\n' "$executable"; }
+            cat >"$fixture/listeners" <<'LISTENERS'
+LISTEN 0 4096 127.0.0.53%lo:53 0.0.0.0:* users:(("systemd-resolve",pid=43,fd=14))
+LISTEN 0 4096 127.0.0.54:53 0.0.0.0:* users:(("systemd-resolve",pid=43,fd=16))
+LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=71,fd=3))
+LISTEN 0 4096 [::]:22 [::]:* users:(("sshd",pid=71,fd=4))
+LISTENERS
+            validate_tcp_listeners
+            sed -i 's/127.0.0.54:53/0.0.0.0:53/' "$fixture/listeners"
+            if (validate_tcp_listeners) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'unexpected listening TCP port' "$fixture/out"
+            sed -i 's/0.0.0.0:53/127.0.0.54:53/; s/pid=43/pid=44/g' "$fixture/listeners"
+            if (validate_tcp_listeners) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'does not belong to systemd-resolved' "$fixture/out"
+            sed -i 's/pid=44/pid=43/g' "$fixture/listeners"
+            executable=/tmp/unrecognized-dns
+            if (validate_tcp_listeners) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'unexpected executable' "$fixture/out"
+            executable=/usr/lib/systemd/systemd-resolved
+            printf 'LISTEN 0 100 127.0.0.1:9000 0.0.0.0:* users:(("unknown",pid=99,fd=3))\n' >>"$fixture/listeners"
+            if (validate_tcp_listeners) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'unexpected listening TCP port' "$fixture/out"
+            """
+        )
+
+    def test_production_mysql_version_detection_accepts_ubuntu_80_only(self):
+        self.run_bash(
+            self.fixture_preamble()
+            + r"""
+            source <(sed '$d' "$bootstrap")
+            client_version='mysql  Ver 8.0.43-0ubuntu0.24.04.1 for Linux on x86_64 ((Ubuntu))'
+            server_version='/usr/sbin/mysqld  Ver 8.0.43-0ubuntu0.24.04.1 for Linux on x86_64 ((Ubuntu))'
+            mysql() { printf '%s\n' "$client_version"; }
+            mysqld() { printf '%s\n' "$server_version"; }
+            verify_mysql_versions
+            client_version='mysql  Ver 15.1 Distrib 10.11.8-MariaDB, for debian-linux-gnu (x86_64)'
+            if (verify_mysql_versions) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'MySQL 8 client is unavailable' "$fixture/out"
+            client_version='mysql  Ver 8.4.0 for Linux on x86_64 (MySQL Community Server - GPL)'
+            if (verify_mysql_versions) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'MySQL 8 client is unavailable' "$fixture/out"
+            client_version='mysql  Ver 8.0.43 for Linux on x86_64 (MySQL Community Server - GPL)'
+            server_version='mysqld  Ver 8.4.0 for Linux on x86_64 (MySQL Community Server - GPL)'
+            if (verify_mysql_versions) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'MySQL 8 server is unavailable' "$fixture/out"
+            """
+        )
+
+    def test_production_mysql_initial_state_allows_only_packaged_local_accounts(self):
+        self.run_bash(
+            self.fixture_preamble()
+            + r"""
+            source <(sed '$d' "$bootstrap")
+            scenario=packaged
+            mysql() {
+              "$PYTHON_BIN" -I - "$scenario" "$@" <<'PY'
+import sqlite3, sys
+scenario = sys.argv[1]
+query = next(value.split('=', 1)[1] for value in sys.argv[2:] if value.startswith('--execute='))
+database = sqlite3.connect(':memory:')
+database.execute("ATTACH DATABASE ':memory:' AS mysql")
+database.execute('CREATE TABLE mysql.user (User TEXT, Host TEXT)')
+database.executemany('INSERT INTO mysql.user VALUES (?, ?)',
+                    [(name, 'localhost') for name in
+                     ('root', 'debian-sys-maint', 'mysql.infoschema', 'mysql.session', 'mysql.sys')])
+database.execute("ATTACH DATABASE ':memory:' AS information_schema")
+database.execute('CREATE TABLE information_schema.SCHEMATA (SCHEMA_NAME TEXT)')
+database.executemany('INSERT INTO information_schema.SCHEMATA VALUES (?)',
+                    [(name,) for name in ('information_schema', 'mysql', 'performance_schema', 'sys')])
+if scenario == 'unknown_account':
+    database.execute("INSERT INTO mysql.user VALUES ('unknown', 'localhost')")
+elif scenario == 'maintenance_remote':
+    database.execute("INSERT INTO mysql.user VALUES ('debian-sys-maint', '%')")
+elif scenario == 'internal_remote':
+    database.execute("INSERT INTO mysql.user VALUES ('mysql.sys', '127.0.0.1')")
+elif scenario == 'business_schema':
+    database.execute("INSERT INTO information_schema.SCHEMATA VALUES ('myapp_worktree_existing')")
+for row in database.execute(query):
+    print(row[0])
+database.close()
+PY
+            }
+            validate_mysql_initial_state
+            for scenario in unknown_account maintenance_remote internal_remote; do
+              if (validate_mysql_initial_state) >"$fixture/out" 2>&1; then exit 1; fi
+              grep -q 'unexpected account' "$fixture/out"
+            done
+            scenario=business_schema
+            if (validate_mysql_initial_state) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'unexpected non-system database' "$fixture/out"
+            """
+        )
+
+    @unittest.skipUnless(os.name == "posix", "production hidden-input transport requires Linux PTY")
+    def test_production_runner_registration_uses_hidden_pty_and_rejects_retries(self):
+        self.run_bash(
+            self.fixture_preamble()
+            + r"""
+            source <(sed '$d' "$bootstrap")
+            mkdir -p "$RUNNER_ROOT_PATH" "$RUNNER_HOME_PATH"
+            printf 'not-a-real-registration-token-value\n' >"$fixture/token"
+            chmod 0600 "$fixture/token"
+            cat >"$RUNNER_ROOT_PATH/config.sh" <<'CONFIG'
+#!/usr/bin/python3
+import os, pathlib, sys, termios
+token = b'not-a-real-registration-token-value'
+assert '--token' not in sys.argv and '--unattended' not in sys.argv
+assert '--disableupdate' in sys.argv
+assert token not in pathlib.Path('/proc/self/cmdline').read_bytes()
+assert token not in pathlib.Path('/proc/self/environ').read_bytes()
+assert os.isatty(0)
+assert not termios.tcgetattr(0)[3] & (termios.ECHO | termios.ECHONL)
+assert sys.argv[sys.argv.index('--runnergroup') + 1] == 'Default'
+print('What is your runner register token? ', end='', flush=True)
+assert sys.stdin.buffer.readline().rstrip(b'\r\n') == token
+mode = pathlib.Path('mode').read_text().strip()
+if mode == 'retry':
+    print('What is your runner register token? ', end='', flush=True)
+    sys.stdin.buffer.readline()
+    raise SystemExit(1)
+if mode == 'fail':
+    print(token.decode(), flush=True)
+    raise SystemExit(1)
+pathlib.Path('registered').touch()
+CONFIG
+            chmod 0755 "$RUNNER_ROOT_PATH/config.sh"
+            printf 'success\n' >"$RUNNER_ROOT_PATH/mode"
+            register_runner_with_token "$fixture/token" >"$fixture/out" 2>&1
+            test -f "$RUNNER_ROOT_PATH/registered"
+            test ! -s "$fixture/out"
+            rm "$RUNNER_ROOT_PATH/registered"
+            printf 'retry\n' >"$RUNNER_ROOT_PATH/mode"
+            if (register_runner_with_token "$fixture/token") >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'runner hidden-input registration failed' "$fixture/out"
+            test ! -f "$RUNNER_ROOT_PATH/registered"
+            printf 'fail\n' >"$RUNNER_ROOT_PATH/mode"
+            if (register_runner_with_token "$fixture/token") >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'runner hidden-input registration failed' "$fixture/out"
+            if grep -q 'not-a-real-registration-token-value' "$fixture/out"; then exit 1; fi
+            """
+        )
+
+    def test_missing_or_invalid_first_admin_is_rejected_before_initialization(self):
+        self.run_bash(
+            self.fixture_preamble()
+            + self.apply_fixture()
+            + r"""
+            source <(sed '$d' "$bootstrap")
+            validate_environment_file "$secrets/joysong.env"
+            sed -i '/^ADMIN_PASSWORD=/d' "$secrets/joysong.env"
+            if (validate_environment_file "$secrets/joysong.env") >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'requires ADMIN_PASSWORD' "$fixture/out"
+            printf 'ADMIN_PASSWORD=short\n' >>"$secrets/joysong.env"
+            if (validate_environment_file "$secrets/joysong.env") >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'requires ADMIN_PASSWORD' "$fixture/out"
+            sed -i 's/ADMIN_PASSWORD=short/ADMIN_PASSWORD=not-a-real-admin-password-value/; s/ADMIN_PHONE=13800000000/ADMIN_PHONE=invalid/' "$secrets/joysong.env"
+            if (validate_environment_file "$secrets/joysong.env") >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'requires a valid ADMIN_PHONE' "$fixture/out"
+            sed -i 's/ADMIN_PHONE=invalid/ADMIN_PHONE=+8613800000000/' "$secrets/joysong.env"
+            if (validate_environment_file "$secrets/joysong.env") >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'requires a valid ADMIN_PHONE' "$fixture/out"
+            sed -i 's/ADMIN_PHONE=+8613800000000/ADMIN_PHONE=13800000000/; s/ADMIN_PASSWORD=not-a-real-admin-password-value/ADMIN_PASSWORD= not-a-real-admin-password-value/' "$secrets/joysong.env"
+            if (validate_environment_file "$secrets/joysong.env") >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'leading or trailing whitespace' "$fixture/out"
+            "$PYTHON_BIN" -I - "$secrets/joysong.env" <<'PY'
+import sys
+path = sys.argv[1]
+with open(path, encoding='utf-8') as stream:
+    lines = [line for line in stream if not line.startswith('ADMIN_PASSWORD=')]
+with open(path, 'w', encoding='utf-8') as stream:
+    stream.writelines(lines)
+    stream.write('ADMIN_PASSWORD=' + '\U0001f512' * 6 + '\n')
+PY
+            validate_environment_file "$secrets/joysong.env"
+            test ! -e "$fixture/run/joysong-bootstrap-packages"
+            """
+        )
+
     def test_preflight_rejects_ports_and_preexisting_resources(self):
         self.run_bash(
             self.fixture_preamble()
@@ -263,6 +462,20 @@ SERVICE
             """
         )
 
+    def test_runner_version_mismatch_is_rejected_before_registration(self):
+        self.run_bash(
+            self.fixture_preamble()
+            + self.apply_fixture()
+            + r"""
+            sed -i 's/2.337.0/2.336.0/' "$payload/bin/Runner.Listener"
+            tar -czf "$archive" -C "$payload" .
+            runner_sha="$(sha256sum "$archive" | awk '{print $1}')"
+            if "$bootstrap" apply "$source_dir" "$secrets" "$archive" 2.337.0 "$runner_sha" >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'runner archive version differs' "$fixture/out"
+            test ! -e "$fixture/opt/joysong-actions-runner/.runner"
+            """
+        )
+
     def test_second_apply_fails_closed_on_template_secret_or_account_drift(self):
         self.run_bash(
             self.fixture_preamble()
@@ -280,6 +493,30 @@ SERVICE
             rm "$fixture/run/joysong-bootstrap-users/joysong-gh-runner"
             if "$bootstrap" apply "$source_dir" "$secrets" "$archive" 2.337.0 "$runner_sha" >"$fixture/out" 2>&1; then exit 1; fi
             grep -q 'joysong-gh-runner is missing' "$fixture/out"
+            """
+        )
+
+    def test_second_apply_rejects_runner_registration_identity_drift(self):
+        self.run_bash(
+            self.fixture_preamble()
+            + self.apply_fixture()
+            + r"""
+            "$bootstrap" apply "$source_dir" "$secrets" "$archive" 2.337.0 "$runner_sha" >/dev/null
+            registration="$fixture/opt/joysong-actions-runner/.runner"
+            cp "$registration" "$fixture/original-registration"
+            for replacement in \
+              's/joysong-uat-i-bp19abm7697mvhl0xewu/unexpected-runner/' \
+              's,https://github.com/shimmail/joysong,https://github.com/unexpected/repository,' \
+              's,/var/lib/joysong-actions-runner,/tmp/unexpected-work,' \
+              's/"agentId":1/"agentId":0/' \
+              's/"agentId":1/"agentId":true/' \
+              's/"disableUpdate":true/"disableUpdate":false/' \
+              's/"disableUpdate":true/"disableUpdate":1/' \
+              's/"agentId":1/"agentId":1,"agentId":2/'; do
+              sed "$replacement" "$fixture/original-registration" >"$registration"
+              if "$bootstrap" apply "$source_dir" "$secrets" "$archive" 2.337.0 "$runner_sha" >"$fixture/out" 2>&1; then exit 1; fi
+              grep -q 'runner registration identity drifted' "$fixture/out"
+            done
             """
         )
 

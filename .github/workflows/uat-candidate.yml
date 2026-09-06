@@ -493,6 +493,7 @@ jobs:
       issues: write
     env:
       GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
       TAG: ${{ github.ref_name }}
       BUNDLE_NAME: ${{ needs.build.outputs.bundle_name }}
       BUNDLE_SHA256: ${{ needs.build.outputs.bundle_sha256 }}
@@ -538,6 +539,7 @@ jobs:
           - [ ] /actuator/health 健康
           - [ ] Flyway history 为成功的 B33 + V34…V40，且与本次 JAR migration digest 一致
           - [ ] 数据库、配置和必要持久数据备份完整且 SHA-256 校验成功
+          - [ ] 首次 ADMIN_PASSWORD 已从运行时配置和 bootstrap 输入中原子移除，受控重启后再次通过服务、MainPID、健康和 Admin 检查
           - [ ] Nginx、数据库及两个业务 Bucket 均未改变
           - [ ] ICP、DNS、TLS 和公网业务验收在后续门禁中单独完成
           EOF

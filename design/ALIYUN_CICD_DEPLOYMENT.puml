@@ -11,7 +11,7 @@ rectangle GitHub {
   component "PR / master\nRequired quality gates\nGitHub-hosted Runner" as Quality
   component "UAT tag build\nBackend + Admin\nGitHub-hosted Runner" as Build
   artifact "Actions Artifact\njoysong-uat-<tag>.tar.gz\nmanifest / SHA / SBOM / scan" as Artifact
-  component "Publish result\nGitHub-hosted job" as Publish
+  component "Publish result\nGitHub-hosted job\nGH_REPO = github.repository" as Publish
   artifact "Private Draft Release" as Draft
   component "Acceptance Issue\nno mobile checklist" as Issue
 }
@@ -41,7 +41,7 @@ Artifact --> Runner : download current run only
 Runner --> DeployData : write incoming/<run-id>
 Runner --> RootDeploy : sudo fixed argv only
 
-Bootstrap --> Runner : verified archive + one-time token
+Bootstrap --> Runner : verified archive/version\nhidden PTY token; no argv/env/log
 Bootstrap --> RootDeploy : install script, verifier, sudoers
 Bootstrap --> Service : install unit; keep inactive/disabled
 Bootstrap --> Nginx : install template
@@ -71,13 +71,15 @@ Reviewer --> Issue : later public and business acceptance
 
 note right of Bootstrap
   preflight expects a blank host and is read-only.
+  TCP: SSH + identity-verified loopback resolved DNS only.
   apply consumes exactly three root-only secret files.
-  Re-apply only verifies an identical installation.
+  Re-apply verifies an identical pre-release installation.
   Unknown or drifting state fails closed.
 end note
 
 note right of Runner
-  Registered with --no-default-labels.
+  Registered with --no-default-labels and --disableupdate.
+  Re-apply verifies repository/name/work identity.
   No cloud or application secrets.
   Cannot read private/staging/state/backups.
   PR workflows never use this Runner.
@@ -85,6 +87,7 @@ end note
 
 note bottom of RootDeploy
   fresh: no previous; empty Flyway may become B33 + V34...V40.
+  fresh requires initial admin credentials; existing forbids ADMIN_PASSWORD.
   existing: migration digest must match; max downtime is 180 seconds.
   Any unexpected Flyway change keeps the service stopped
   with the transaction marker for manual recovery.

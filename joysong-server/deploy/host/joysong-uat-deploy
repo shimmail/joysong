@@ -537,11 +537,45 @@ verify_fresh_state_unchanged() {
 
 load_deployment_state() {
   classify_deployment_mode
+  validate_administrator_configuration || fail "administrator configuration does not match deployment mode"
   if [[ "$DEPLOY_MODE" == fresh ]]; then
     load_fresh_state
   else
     load_current_state
   fi
+}
+
+validate_administrator_configuration() {
+  # Read secrets directly from the protected file; only its path and the mode
+  # cross the process boundary, and validation errors never include values.
+  "$PYTHON_BIN" -I - "$CONFIG_FILE" "$DEPLOY_MODE" <<'PY'
+import re, sys
+path, mode = sys.argv[1:]
+values = {}
+for raw in open(path, encoding="utf-8"):
+    line = raw.rstrip("\r\n")
+    if not line.strip() or line.lstrip().startswith("#"):
+        continue
+    match = re.fullmatch(r"([A-Z][A-Z0-9_]*)=(.*)", line)
+    if not match or match.group(1) in values:
+        raise SystemExit("runtime configuration has an invalid or duplicate assignment")
+    key, value = match.groups()
+    if len(value) >= 2 and value[0] in ("'", '"') and value[-1] == value[0]:
+        value = value[1:-1]
+    values[key] = value
+if not re.fullmatch(r"1[0-9]{10}", values.get("ADMIN_PHONE", "")):
+    raise SystemExit("ADMIN_PHONE must identify the configured administrator")
+if mode == "fresh":
+    password = values.get("ADMIN_PASSWORD", "")
+    # Match Kotlin String.length, including surrogate pairs, before Flyway runs.
+    if password != password.strip() or not 12 <= len(password.encode("utf-16-le")) // 2 <= 128:
+        raise SystemExit("fresh deployment requires ADMIN_PASSWORD with 12-128 characters")
+elif mode == "existing":
+    if "ADMIN_PASSWORD" in values:
+        raise SystemExit("existing deployment requires ADMIN_PASSWORD to be removed")
+else:
+    raise SystemExit("administrator configuration requires a known deployment mode")
+PY
 }
 
 verify_service_contract() {
