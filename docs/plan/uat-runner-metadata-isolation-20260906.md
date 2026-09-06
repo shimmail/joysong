@@ -40,3 +40,10 @@
 - PR #10 已合并为 `06b333de`，head 门禁 `34019242839`、merge 门禁 `34019334091` 均成功。ECS 使用派生配置完成真实 MySQL 8 空库导出和 gzip 校验，更新后的主机契约复核成功。
 - `v0.0.1-uat.2` / run `34019458732` 已完成备份、B33 + V34…V40 全部迁移、应用约 20 秒启动和管理员初始化；部署器健康等待超时后停用服务并保留事务，Backend current 保留、Admin current 尚无。数据库已迁移，不再具备 fresh 条件，禁止重建或清空以重试。
 - 监听门禁原先整行搜索 IPv4 文本，无法识别 Java 的 IPv4-mapped IPv6 回环表示。修复只接受精确本地回环地址及同一 MainPID 的独占监听；恢复必须先核对原事务、制品、备份、配置和完整迁移历史，失败保留数据库与事务。旧 workflow 失败事实保留，恢复后的下一 tag 走 existing 正常发布。
+- PR #11 已合并为 `6d2bb053`，head 门禁 `34020060152`、merge 门禁 `34020145814` 均成功；实机随后确认监听为 `[::ffff:127.0.0.1]:8080`，新精确检查通过。
+- tag.2 的受控恢复预检核对了原事务、制品、80 个 Admin 文件、完整备份、配置和 8 条迁移。启动前另存已迁移数据库完整快照；23 秒完成尾段恢复，恢复前后数据与持久目录一致。原 CI run 保持 failure，root-only `state/operator-recovery-v0.0.1-uat.2/` 保存原事务、快照、监听和恢复证据，不把人工恢复冒充 CI 成功。
+- 首次 `ADMIN_PASSWORD` 已从本地受控输入、服务器 bootstrap 输入和运行配置逐一原子移除，权限保持原状。重启后 PID 更新、版本及 Flyway 不变；管理员密码登录和测试会话退出成功。初始登录信息单独保存在本地受控目录 `D:\code\kotlin\joysong-uat-admin-access`，不进入部署输入或 Git。
+- `v0.0.1-uat.3` / [run 34020596905](https://github.com/shimmail/joysong/actions/runs/34020596905) 在 `6d2bb053` 完成标准 existing 流程，preflight、build、deploy、publish 全部成功。
+- 独立服务器验收通过：实际 JAR、80 个 Admin 文件、当前 tag/commit/run、B33 + V34…V40、服务 active/enabled、新 MainPID 独占回环 8080、健康接口与 Admin `/`、`/orders` 均匹配。previous 双端指向已验收的 tag.2，旧制品、`previous-pair` 及备份身份/摘要完整一致。
+- 最终 bundle SHA-256 为 `1c7164525027e4f9cc2b1e15562a7aa6a5268082ef2bd51111cb97c7bf75cad7`，Actions Artifact、运行状态、Draft Release 资产摘要及验收 Issue 标记一致。
+- [Draft Release](https://github.com/shimmail/joysong/releases/tag/untagged-cb5ad5a9c16ac6b3a064) 保持私有仓库草稿；[验收 Issue #12](https://github.com/shimmail/joysong/issues/12) 已记录技术验收证据并保持 open。最终状态为 **UAT Candidate 已部署，公网未 Ready**；ICP、DNS、TLS 及公网/业务能力验收仍由后续门禁完成。
