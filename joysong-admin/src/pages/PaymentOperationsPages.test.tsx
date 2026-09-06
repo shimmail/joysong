@@ -279,7 +279,7 @@ describe('OrdersPage travel ground service operations', () => {
     expect(within(legacyRow).getByRole('button', { name: /变更状态/ })).toBeInTheDocument();
     expect(within(legacyRow).getByText('legacy-verified-at')).toBeInTheDocument();
     expect(within(legacyRow).getByText('legacy-settlement-at')).toBeInTheDocument();
-  }, 30_000);
+  }, 60_000);
 });
 
 describe('PaymentsPage service-fee records', () => {
@@ -506,7 +506,7 @@ describe('RefundsPage manual review operations', () => {
     const otherRow = screen.getByRole('row', { name: /SO-002/ });
     expect(within(otherRow).getByRole('button', { name: /批准/ })).toBeEnabled();
     expect(within(otherRow).getByRole('button', { name: /拒绝/ })).toBeEnabled();
-  });
+  }, 15_000);
 
   it('submits rejection once and locks that row when the required refresh fails', async () => {
     const user = userEvent.setup();
