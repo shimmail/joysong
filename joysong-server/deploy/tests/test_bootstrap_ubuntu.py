@@ -166,11 +166,11 @@ IFS= read -r token
 printf '\357\273\277' >.runner
 printf '{"agentId":1,"agentName":"%s","gitHubUrl":"%s","workFolder":"%s","disableUpdate":true}\n' "$name" "$repository" "$work" >>.runner
 CONFIG
-            cat >"$payload/runsvc.sh" <<'SERVICE'
+            cat >"$payload/bin/runsvc.sh" <<'SERVICE'
 #!/bin/sh
 exit 0
 SERVICE
-            chmod 0755 "$payload/bin/Runner.Listener" "$payload/config.sh" "$payload/runsvc.sh"
+            chmod 0755 "$payload/bin/Runner.Listener" "$payload/config.sh" "$payload/bin/runsvc.sh"
             tar -czf "$archive" -C "$payload" .
             runner_sha="$(sha256sum "$archive" | awk '{print $1}')"
         """
@@ -482,6 +482,8 @@ PY
               test "$(stat -c '%a' "$fixture/etc/mysql/joysong-uat-backup.cnf")" = 600 || { echo 'backup mode' >&2; exit 1; }
             fi
             test -f "$fixture/opt/joysong-actions-runner/.runner" || { echo 'runner marker missing' >&2; exit 1; }
+            cmp "$payload/bin/runsvc.sh" "$fixture/opt/joysong-actions-runner/runsvc.sh"
+            test -x "$fixture/opt/joysong-actions-runner/runsvc.sh" || { echo 'runner service script is not executable' >&2; exit 1; }
             test "$(cat "$fixture/run/joysong-bootstrap-services/joysong-uat-runner.service.active")" = active || { echo 'runner not active' >&2; exit 1; }
             test ! -e "$fixture/run/joysong-bootstrap-services/joysong-demo.service.active" || { echo 'app unexpectedly active' >&2; exit 1; }
             before="$(find "$fixture" -type f ! -path '*/first.out' -print0 | sort -z | xargs -0 sha256sum | sha256sum)"
@@ -503,6 +505,51 @@ PY
             if "$bootstrap" apply "$source_dir" "$secrets" "$archive" 2.337.0 "$runner_sha" >"$fixture/out" 2>&1; then exit 1; fi
             grep -q 'runner archive version differs' "$fixture/out"
             test ! -e "$fixture/opt/joysong-actions-runner/.runner"
+            """
+        )
+
+    def test_missing_official_runner_service_template_is_rejected_before_registration(self):
+        self.run_bash(
+            self.fixture_preamble()
+            + self.apply_fixture()
+            + r"""
+            rm "$payload/bin/runsvc.sh"
+            tar -czf "$archive" -C "$payload" .
+            runner_sha="$(sha256sum "$archive" | awk '{print $1}')"
+            if "$bootstrap" apply "$source_dir" "$secrets" "$archive" 2.337.0 "$runner_sha" >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'runner service script source' "$fixture/out"
+            test ! -e "$fixture/opt/joysong-actions-runner/.runner"
+            test ! -e "$fixture/run/joysong-bootstrap-services/joysong-uat-runner.service.active"
+            test ! -e "$secrets/runner-registration-token"
+            """
+        )
+
+    def test_runner_service_script_destination_collision_is_rejected(self):
+        self.run_bash(
+            self.fixture_preamble()
+            + self.apply_fixture()
+            + r"""
+            printf 'unexpected-root-script\n' >"$payload/runsvc.sh"
+            tar -czf "$archive" -C "$payload" .
+            runner_sha="$(sha256sum "$archive" | awk '{print $1}')"
+            if "$bootstrap" apply "$source_dir" "$secrets" "$archive" 2.337.0 "$runner_sha" >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'runner service script destination already exists' "$fixture/out"
+            grep -Fxq 'unexpected-root-script' "$fixture/opt/joysong-actions-runner/runsvc.sh"
+            test ! -e "$fixture/opt/joysong-actions-runner/.runner"
+            test ! -e "$secrets/runner-registration-token"
+            """
+        )
+
+    def test_second_apply_rejects_runner_service_script_drift(self):
+        self.run_bash(
+            self.fixture_preamble()
+            + self.apply_fixture()
+            + r"""
+            "$bootstrap" apply "$source_dir" "$secrets" "$archive" 2.337.0 "$runner_sha" >/dev/null
+            service="$fixture/opt/joysong-actions-runner/runsvc.sh"
+            printf '\n# unauthorized change\n' >>"$service"
+            if "$bootstrap" apply "$source_dir" "$secrets" "$archive" 2.337.0 "$runner_sha" >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'runner service script content drifted' "$fixture/out"
             """
         )
 

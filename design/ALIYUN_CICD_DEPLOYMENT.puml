@@ -41,7 +41,7 @@ Artifact --> Runner : download current run only
 Runner --> DeployData : write incoming/<run-id>
 Runner --> RootDeploy : sudo fixed argv only
 
-Bootstrap --> Runner : verified archive/version\nhidden PTY token; no argv/env/log
+Bootstrap --> Runner : verified archive/version\ncopy bin/runsvc.sh to root (0755)\nhidden PTY token; no argv/env/log
 Bootstrap --> RootDeploy : install script, verifier, sudoers
 Bootstrap --> Service : install unit; keep inactive/disabled
 Bootstrap --> Nginx : install template

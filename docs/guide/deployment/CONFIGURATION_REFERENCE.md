@@ -203,6 +203,7 @@ bootstrap-uat-host.sh apply <source-dir> <secrets-dir> <runner-archive> <runner-
 | 版本/平台 | 官方 Linux x64 `v2.337.0` |
 | archive SHA-256 | `70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613` |
 | 官方归档链接 | 固定摘要之外，仅允许 `externals/node20`、`externals/node24` 的 `bin/corepack`、`bin/npm`、`bin/npx` 指向各自包内固定普通文件；拒绝其他链接、重复路径、链接子路径或缺失目标。应用发布包的链接禁令不变 |
+| Runner 服务脚本 | 从固定归档 `bin/runsvc.sh` 复制到安装根目录，Runner 属主、`0755`；重复验收检查普通文件、字节一致和权限属主 |
 | 标签 | 以 `--no-default-labels` 注册，只保留 `joysong-uat-deploy` |
 | 自动更新 | `--disableupdate`，禁止注册后静默偏离已批准版本；更新须另行校验 archive/version/hash |
 | 注册 identity | `.runner` 中正整数 `agentId`、固定 `agentName`/`gitHubUrl`/`workFolder`，且 `disableUpdate=true`；二次 apply 拒绝漂移 |
