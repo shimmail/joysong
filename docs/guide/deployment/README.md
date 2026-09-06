@@ -276,6 +276,8 @@ existing deploy 写 root-only 事务标记后进入最长 180 秒停机预算，
 
 首次健康成功后，下一 tag 必须自动进入 existing 路径。首次成功还必须从安装环境文件及受控 bootstrap 输入中分别原子移除 `ADMIN_PASSWORD`，保留 owner/mode、不输出值；受控重启并再次完成相同健康检查。existing preflight 拒绝仍存在该键的配置（即使为空），但保留并验证 `ADMIN_PHONE`。首次配置备份仍按 root-only 边界保管，不因去密而改写备份证据。
 
+监听验收解析 `ss` 的本地地址字段，接受 `127.0.0.1:8080` 及其 IPv4-mapped IPv6 等价表示，并要求只有一条 LISTEN、所有拥有者 PID 均为应用 MainPID。`0.0.0.0`、`::`、`::1`、其他回环地址和额外监听仍拒绝。若首次迁移已成功但启动验收失败，保留数据库和事务标记，核对原候选与备份后受控恢复；不能删除数据库或直接重跑 fresh 流程。
+
 ## 9. Migration 与恢复门禁
 
 fresh 仅允许从空库运行当前 JAR 内固定的 `B33 + V34…V40`。existing 只接受 migration digest 完全相同的候选；digest 不同不得通过 tag 部署试错。

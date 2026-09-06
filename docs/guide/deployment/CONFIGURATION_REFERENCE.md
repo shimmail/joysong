@@ -31,6 +31,7 @@
 | systemd 用户/组 | `joysong-demo` | Runner 不加入该组 |
 | Nginx 用户/组 | `www-data` | Ubuntu 24.04 固定契约；Runner 不加入该组 |
 | Backend bind | `127.0.0.1:8080` | 不监听公网或 8081 |
+| 监听地址验收 | 精确本地 IPv4 或 IPv4-mapped IPv6 等价回环 | 单条 LISTEN，全部拥有者 PID 为 MainPID；拒绝通配地址、`::1`、其他回环和多监听 |
 | Backend 工作目录 | `/opt/joysong-demo/current` | 由仓库 systemd 模板决定并由 host-contract 核验 |
 | 环境文件 | `/etc/joysong-demo/joysong.env` | root-owned，Runner 不可读 |
 | 时区 `TZ` | 由首次 `joysong.env` 明确提供 | tag 部署不覆盖应用时区 |
