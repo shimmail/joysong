@@ -207,6 +207,7 @@ bootstrap-uat-host.sh apply <source-dir> <secrets-dir> <runner-archive> <runner-
 | 注册 identity | `.runner` 中正整数 `agentId`、固定 `agentName`/`gitHubUrl`/`workFolder`，且 `disableUpdate=true`；二次 apply 拒绝漂移 |
 | 应用组 | 不加入 `joysong-demo`、`www-data` 或其他应用组 |
 | 云凭据 | 无 |
+| 元数据隔离 | Runner `IPAddressDeny=100.100.100.200/32`；注册前、每次启动和二次初始化均验证，应用 IMDSv2 正向检查前后成功、Runner 同 cgroup 负向检查失败才通过 |
 | 应用秘密 | 无，且不能读 `/etc/joysong-demo/joysong.env` |
 | sudo | 仅 `/usr/local/sbin/joysong-uat-deploy`，`NOSETENV`、固定 `PATH` |
 | 当前主机 OS | 已验证 Ubuntu 24.04.4 LTS / x86_64 / systemd 255 |
@@ -215,6 +216,8 @@ bootstrap-uat-host.sh apply <source-dir> <secrets-dir> <runner-archive> <runner-
 | online 门禁 | Listener `2.337.0`、service active、GitHub Runner API `online` |
 
 Runner 注册 token 是一次性接入材料，只能位于受控 `<secrets-dir>/runner-registration-token`。注册前核验 Listener 版本；root 读取 token 并通过受控 PTY 响应隐藏提示，不通过 `--token`、Runner 环境变量或普通 stdin 管道。终端输出不转发，重复提示、超时或注册失败即终止；进入安装事务后成功或失败退出均清理 token。不得提交、写入 workflow、保存到 Issue 或长期记录在 shell history。
+
+元数据探针固定安装在 `/usr/local/lib/joysong-deploy/check-runner-metadata.py`，由 bootstrap 内嵌模板生成，要求 `root:root 0644`。只有固定启动探针使用 `ExecStartPre=+`，不会给 Runner 开放通用 root 命令。正向检查仅读取 token 和角色名称，不请求角色凭据正文；不新增应用环境变量，不改变现有 ECS 实例角色或 Bucket 权限。
 
 固定版本不是无限期免更新：执行前必须再次确认 GitHub 仍接受该版本；版本到期或安全更新导致不调度时停止，先更新批准基线和校验摘要，不通过开启静默更新绕过契约。维护规则见 [GitHub Self-hosted runners reference](https://docs.github.com/en/actions/reference/runners/self-hosted-runners#runner-software-updates-on-self-hosted-runners)。
 
@@ -283,7 +286,7 @@ publish job 不 checkout，通过非秘密 `GH_REPO: ${{ github.repository }}` �
 
 ## 14. 首次秘密交付准备
 
-2026-09-06 用户确认两份持久文件尚未准备；当前只允许本地开发和远端只读核验，不运行 bootstrap apply、不注册 Runner、不创建 UAT tag。
+2026-09-06 两份持久文件已在仓库外受控目录准备并通过配置校验；应用使用已绑定的 `joysong-demo-oss-role`，不配置静态 OSS AccessKey。用户已授权继续部署。初始化前仍须完成 Runner 元数据隔离修复、精确 SHA 门禁和 fresh-host 复核；配置就绪不表示 ECS 已初始化或业务验收通过。
 
 先在仓库之外准备受控目录，向执行者仅提供目录路径，不粘贴内容。Windows 本地输入用 ACL 限定本人及必要管理员访问；交付到 ECS 后目录必须为 `root:root 0700`，文件为 `root:root 0600`、普通单硬链接文件。不要把开发 `.env.example` 直接作为 UAT 配置：其中数据库名、路径和业务开关不构成本主机契约。
 

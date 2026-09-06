@@ -82,6 +82,9 @@ note right of Runner
   Re-apply verifies repository/name/work identity.
   No cloud or application secrets.
   Cannot read private/staging/state/backups.
+  Cannot reach ECS metadata (100.100.100.200).
+  Startup guard: app IMDSv2 OK before/after Runner deny.
+  Guard runs in Runner cgroup; app control uses separate service.
   PR workflows never use this Runner.
 end note
 
