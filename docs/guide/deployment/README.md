@@ -101,6 +101,7 @@ GitHub-hosted Runner 负责所有不需要主机访问的工作：
 - 使用 `--disableupdate` 固定已批准版本；版本到期或必需安全更新时停止发布并单独更新基线，不让 Runner 静默升级；
 - 不得读取 `/etc/joysong-demo/joysong.env`；
 - 不保存数据库、OSS、阿里云、JWT、AI、翻译或其他应用秘密；
+- Runner 服务通过 `IPAddressDeny=100.100.100.200/32` 禁止访问 ECS 元数据；每次启动前在相同 cgroup 内执行 root-owned 探针，独立应用用户服务在负向检查前后均须成功访问 IMDSv2 token 和角色列表。只检查可达性，不获取或输出角色凭据；单独超时不算隔离成功。注册前预验证、二次初始化复核及每次启动均失败即停止；
 - 不配置通用 `linux`、`x64` 调度标签，deploy job 只指定 `joysong-uat-deploy`；
 - PR workflow 永不调度到该 Runner；
 - Runner 只能写自己的 work 目录和受控 `incoming` 区域；
@@ -110,6 +111,8 @@ GitHub-hosted Runner 负责所有不需要主机访问的工作：
 仓库级 Runner 仍有固有风险：能够修改默认分支 workflow 的攻击者，可能尝试把任务调度到 UAT 主机。因此 Runner 的影响面必须被固定 root 入口、最小 sudoers、目录权限和无秘密设计共同限制。Prod 不得直接沿用该仓库级 Runner 模型，必须另行完成更强的环境隔离、审批和发布身份设计。
 
 Ubuntu 24.04 不安装任何 CentOS/GLIBC 兼容层。接入证据必须同时包含 `Runner.Listener --version == 2.337.0`、Runner service active 和 GitHub Runner API `online`；未全部通过前不得推送 UAT tag。ECS deploy job 仍固定为纯 shell、零 `uses:`，以缩小第三方 Action 在主机上的执行面。
+
+`/usr/local/lib/joysong-deploy/check-runner-metadata.py` 由 bootstrap 生成并以 `root:root 0644` 安装。仅固定 `ExecStartPre=+` 探针以 root 运行，用于向 PID 1 请求独立应用正向检查；Runner 本体仍为 `joysong-gh-runner`。二次初始化精确验证探针内容、加载的拒绝规则、空允许规则、无 drop-in、无需 daemon reload 以及启动探针成功记录。不能通过普通 `runuser` 检查代替同一 systemd cgroup 内的检查。
 
 ### 3.3 root 部署入口
 

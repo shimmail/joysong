@@ -54,6 +54,7 @@ RUNNER_UNIT="$(host_path "/etc/systemd/system/$RUNNER_SERVICE")"
 NGINX_SITE="$(host_path /etc/nginx/conf.d/joysong-public.conf)"
 NGINX_DEFAULT="$(host_path /etc/nginx/sites-enabled/default)"
 INSTALL_ROOT="$(host_path /usr/local/lib/joysong-deploy)"
+RUNNER_METADATA_PROBE="$INSTALL_ROOT/check-runner-metadata.py"
 ENTRYPOINT="$(host_path /usr/local/sbin/joysong-uat-deploy)"
 SUDOERS="$(host_path /etc/sudoers.d/joysong-uat-deploy)"
 BACKEND_ROOT="$(host_path /opt/joysong-demo)"
@@ -62,7 +63,7 @@ DATA_ROOT="$(host_path /var/lib/joysong-demo)"
 DEPLOY_ROOT="$(host_path /var/lib/joysong-deploy)"
 RUNNER_HOME_PATH="$(host_path "$RUNNER_HOME")"
 RUNNER_ROOT_PATH="$(host_path "$RUNNER_ROOT")"
-readonly MYSQL_CONFIG SYSTEMD_UNIT RUNNER_UNIT NGINX_SITE NGINX_DEFAULT INSTALL_ROOT ENTRYPOINT
+readonly MYSQL_CONFIG SYSTEMD_UNIT RUNNER_UNIT NGINX_SITE NGINX_DEFAULT INSTALL_ROOT ENTRYPOINT RUNNER_METADATA_PROBE
 readonly SUDOERS BACKEND_ROOT ADMIN_ROOT DATA_ROOT DEPLOY_ROOT RUNNER_HOME_PATH RUNNER_ROOT_PATH
 
 mode_not_writable_by_group_or_other() {
@@ -726,6 +727,121 @@ extract_and_register_runner() {
   rm -f -- "$token_file"
 }
 
+render_runner_metadata_probe() {
+  cat <<'PY'
+"""Fail closed unless the runner cgroup blocks an otherwise healthy ECS IMDS."""
+import errno
+import os
+import socket
+import subprocess
+import uuid
+
+
+APP_PROBE = r'''
+import http.client
+connection = http.client.HTTPConnection("100.100.100.200", 80, timeout=3)
+try:
+    connection.request("PUT", "/latest/api/token",
+                       headers={"X-aliyun-ecs-metadata-token-ttl-seconds": "60"})
+    response = connection.getresponse()
+    token = response.read(4097)
+    if response.status != 200 or not 0 < len(token) <= 4096:
+        raise ValueError("IMDS token unavailable")
+    connection.request("GET", "/latest/meta-data/ram/security-credentials/",
+                       headers={"X-aliyun-ecs-metadata-token": token.decode("ascii")})
+    response = connection.getresponse()
+    roles = response.read(4097)
+    if response.status != 200 or not roles.strip() or len(roles) > 4096:
+        raise ValueError("IMDS role unavailable")
+finally:
+    connection.close()
+'''
+
+
+def application_metadata_available():
+    # PID 1 creates this control outside the runner cgroup. Never fetch keys.
+    unit = "joysong-imds-control-" + uuid.uuid4().hex + ".service"
+    try:
+        result = subprocess.run([
+            "/usr/bin/systemd-run", "--quiet", "--pipe", "--wait", "--collect",
+            "--unit=" + unit, "--property=Type=exec", "--property=User=joysong-demo",
+            "--property=Group=joysong-demo", "--property=RuntimeMaxSec=12s",
+            "--property=TimeoutStartSec=12s", "/usr/bin/python3", "-I", "-c", APP_PROBE,
+        ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+           timeout=18, check=False, env={"PATH": "/usr/bin:/bin", "LANG": "C"})
+        if result.returncode != 0:
+            raise RuntimeError("application metadata control failed")
+    finally:
+        # Also bound and clean up a unit if the systemd-run client times out.
+        subprocess.run(["/usr/bin/systemctl", "stop", unit], stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=5, check=False)
+
+
+def check_runner_metadata():
+    if os.geteuid() != 0:
+        raise RuntimeError("metadata guard requires root")
+    application_metadata_available()
+    try:
+        with socket.create_connection(("100.100.100.200", 80), timeout=3):
+            raise RuntimeError("runner can reach ECS metadata")
+    except TimeoutError:
+        pass  # cgroup IPAddressDeny drops packets rather than returning EPERM.
+    except OSError as error:
+        if error.errno not in (errno.EPERM, errno.EACCES):
+            raise RuntimeError("runner metadata probe had an inconclusive network failure") from None
+    # A timeout alone is not proof: an independent application control must
+    # succeed on both sides of the denied connection, including every startup.
+    application_metadata_available()
+
+
+if __name__ == "__main__":
+    try:
+        check_runner_metadata()
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        raise SystemExit("Runner metadata isolation check failed") from None
+    print("Application metadata available; runner metadata blocked")
+PY
+}
+
+write_runner_metadata_probe() {
+  local stage
+  stage="$(mktemp "$INSTALL_ROOT/.runner-metadata.XXXXXX")"
+  render_runner_metadata_probe >"$stage"
+  chmod 0644 "$stage"
+  if [[ "$TEST_MODE" == false ]]; then chown root:root "$stage"; fi
+  mv -T -- "$stage" "$RUNNER_METADATA_PROBE"
+}
+
+verify_runner_metadata_isolation() {
+  require_root_protected_file "$RUNNER_METADATA_PROBE" 644 "runner metadata probe"
+  [[ "$(cat "$RUNNER_METADATA_PROBE")" == "$(render_runner_metadata_probe)" ]] || fail "runner metadata probe drifted"
+  if [[ "$TEST_MODE" == true ]]; then return; fi
+  # The same startup guard executes under a transient runner service before
+  # registration; no usable GitHub runner exists until this check succeeds.
+  systemd-run --quiet --pipe --wait --collect --property=Type=exec \
+    --property="User=$RUNNER_USER" --property="Group=$RUNNER_USER" \
+    --property=IPAddressDeny=100.100.100.200/32 --property=TimeoutStartSec=50s \
+    --property=RuntimeMaxSec=50s \
+    --property="ExecStartPre=+/usr/bin/python3 -I $RUNNER_METADATA_PROBE" /usr/bin/true ||
+    fail "runner metadata isolation is unavailable"
+}
+
+verify_loaded_runner_isolation() {
+  local startup phase="${1:-started}"
+  if [[ "$TEST_MODE" == true ]]; then return; fi
+  [[ "$(systemctl show "$RUNNER_SERVICE" -p NeedDaemonReload --value)" == no ]] || fail "runner unit requires daemon reload"
+  [[ -z "$(systemctl show "$RUNNER_SERVICE" -p DropInPaths --value)" ]] || fail "runner unit has unexpected drop-ins"
+  [[ "$(systemctl show "$RUNNER_SERVICE" -p IPAddressDeny --value)" == 100.100.100.200/32 ]] || fail "loaded runner metadata deny rule drifted"
+  [[ -z "$(systemctl show "$RUNNER_SERVICE" -p IPAddressAllow --value)" ]] || fail "loaded runner IP allow rule overrides isolation"
+  startup="$(systemctl show "$RUNNER_SERVICE" -p ExecStartPre --value)"
+  [[ "$startup" == *"argv[]=/usr/bin/python3 -I $RUNNER_METADATA_PROBE ; ignore_errors=no ;"* ]] ||
+    fail "runner metadata startup guard is missing or unsuccessful"
+  if [[ "$phase" != before-start ]]; then
+    [[ "$startup" == *"code=exited ; status=0"* ]] || fail "runner metadata startup guard is missing or unsuccessful"
+  fi
+}
+
 write_runner_unit() {
   local stage
   stage="$(mktemp "$(dirname "$RUNNER_UNIT")/.joysong-uat-runner.XXXXXX")"
@@ -742,7 +858,10 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+ExecStartPre=+/usr/bin/python3 -I /usr/local/lib/joysong-deploy/check-runner-metadata.py
 ExecStart=/opt/joysong-actions-runner/runsvc.sh
+IPAddressDeny=100.100.100.200/32
+TimeoutStartSec=50s
 User=joysong-gh-runner
 Group=joysong-gh-runner
 WorkingDirectory=/opt/joysong-actions-runner
@@ -791,6 +910,8 @@ verify_installed_layout() {
   require_root_protected_file "$DEPLOY_ROOT/state/deploy.lock" 600 "deployment lock"
   require_root_protected_file "$RUNNER_UNIT" 644 "runner unit"
   [[ "$(cat "$RUNNER_UNIT")" == "$(render_runner_unit)" ]] || fail "runner unit drifted"
+  verify_runner_metadata_isolation
+  verify_loaded_runner_isolation
   [[ "$(cat "$SUDOERS")" == "$(render_sudoers)" ]] || fail "runner sudoers content drifted"
   if [[ "$TEST_MODE" == true ]]; then return; fi
   while IFS='|' read -r path expected; do
@@ -954,6 +1075,8 @@ apply_fresh() {
   install_file root root 0600 /dev/null "$DEPLOY_ROOT/state/deploy.lock"
 
   provision_database "$secrets_dir/joysong.env" "$secrets_dir/joysong-uat-backup.cnf"
+  write_runner_metadata_probe
+  verify_runner_metadata_isolation
   extract_and_register_runner "$archive" "$token_file" "$version" "$sha"
   trap - EXIT INT TERM
   write_runner_unit
@@ -963,6 +1086,7 @@ apply_fresh() {
     systemd-analyze verify "$SYSTEMD_UNIT" "$RUNNER_UNIT" >/dev/null 2>&1 || fail "systemd unit validation failed"
     nginx -t
     systemctl daemon-reload
+    verify_loaded_runner_isolation before-start
     systemctl enable --now nginx
     systemctl reload nginx
     systemctl enable "$RUNNER_SERVICE"

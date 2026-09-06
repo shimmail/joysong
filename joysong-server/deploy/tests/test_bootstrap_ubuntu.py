@@ -1,11 +1,13 @@
 from __future__ import print_function
 
 import os
+import errno
 import shutil
 import subprocess
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 DEPLOY_ROOT = Path(__file__).resolve().parents[1]
@@ -521,6 +523,101 @@ PY
             """
         )
 
+    def test_second_apply_rejects_runner_metadata_guard_and_unit_drift(self):
+        self.run_bash(
+            self.fixture_preamble()
+            + self.apply_fixture()
+            + r"""
+            "$bootstrap" apply "$source_dir" "$secrets" "$archive" 2.337.0 "$runner_sha" >/dev/null
+            unit="$fixture/etc/systemd/system/joysong-uat-runner.service"
+            guard="$fixture/usr/local/lib/joysong-deploy/check-runner-metadata.py"
+            grep -Fxq 'IPAddressDeny=100.100.100.200/32' "$unit"
+            grep -Fxq 'ExecStartPre=+/usr/bin/python3 -I /usr/local/lib/joysong-deploy/check-runner-metadata.py' "$unit"
+            cp "$unit" "$fixture/original-unit"
+            cp "$guard" "$fixture/original-guard"
+            for rule in IPAddressDeny ExecStartPre; do
+              sed "/^$rule=/d" "$fixture/original-unit" >"$unit"
+              if "$bootstrap" apply "$source_dir" "$secrets" "$archive" 2.337.0 "$runner_sha" >"$fixture/out" 2>&1; then exit 1; fi
+              grep -q 'runner unit drifted' "$fixture/out"
+            done
+            cp "$fixture/original-unit" "$unit"
+            printf '\n# unauthorized guard change\n' >>"$guard"
+            if "$bootstrap" apply "$source_dir" "$secrets" "$archive" 2.337.0 "$runner_sha" >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'runner metadata probe drifted' "$fixture/out"
+            rm "$guard"
+            if "$bootstrap" apply "$source_dir" "$secrets" "$archive" 2.337.0 "$runner_sha" >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'runner metadata probe' "$fixture/out"
+            """
+        )
+
+    def test_loaded_runner_isolation_rejects_overrides_and_unsuccessful_guard(self):
+        apply_source = BOOTSTRAP.read_text(encoding="utf-8").split("apply_fresh() {\n", 1)[1].split("\nmain() {", 1)[0]
+        reload_position = apply_source.index("systemctl daemon-reload")
+        verify_position = apply_source.index("verify_loaded_runner_isolation before-start")
+        enable_position = apply_source.index('systemctl enable "$RUNNER_SERVICE"')
+        start_position = apply_source.index('systemctl start "$RUNNER_SERVICE"')
+        self.assertLess(reload_position, verify_position)
+        self.assertLess(verify_position, enable_position)
+        self.assertLess(verify_position, start_position)
+        self.run_bash(
+            self.fixture_preamble()
+            + r"""
+            source <(sed -n '/^verify_loaded_runner_isolation() {$/,/^}$/p' "$bootstrap")
+            fail() { printf '%s\n' "$*" >&2; exit 1; }
+            TEST_MODE=false
+            RUNNER_SERVICE=joysong-uat-runner.service
+            RUNNER_METADATA_PROBE=/usr/local/lib/joysong-deploy/check-runner-metadata.py
+            reload=no
+            dropins=''
+            deny=100.100.100.200/32
+            allow=''
+            mock_startup="{ argv[]=/usr/bin/python3 -I $RUNNER_METADATA_PROBE ; ignore_errors=no ; code=exited ; status=0 ; }"
+            systemctl() {
+              case "$4" in
+                NeedDaemonReload) printf '%s\n' "$reload" ;;
+                DropInPaths) printf '%s\n' "$dropins" ;;
+                IPAddressDeny) printf '%s\n' "$deny" ;;
+                IPAddressAllow) printf '%s\n' "$allow" ;;
+                ExecStartPre) printf '%s\n' "$mock_startup" ;;
+                *) return 1 ;;
+              esac
+            }
+            verify_loaded_runner_isolation
+            completed_startup="$mock_startup"
+            mock_startup="{ argv[]=/usr/bin/python3 -I $RUNNER_METADATA_PROBE ; ignore_errors=no ; }"
+            verify_loaded_runner_isolation before-start
+            if (verify_loaded_runner_isolation) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'startup guard is missing or unsuccessful' "$fixture/out"
+            mock_startup="$completed_startup"
+            reload=yes
+            if (verify_loaded_runner_isolation) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'requires daemon reload' "$fixture/out"
+            reload=no
+            dropins=/etc/systemd/system/joysong-uat-runner.service.d/override.conf
+            if (verify_loaded_runner_isolation) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'drop-in' "$fixture/out"
+            if (verify_loaded_runner_isolation before-start) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'drop-in' "$fixture/out"
+            dropins=''
+            deny=''
+            if (verify_loaded_runner_isolation) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'deny rule drifted' "$fixture/out"
+            deny=100.100.100.200/32
+            allow=100.100.100.200/32
+            if (verify_loaded_runner_isolation) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'allow rule overrides isolation' "$fixture/out"
+            allow=''
+            mock_startup="${mock_startup/status=0/status=1}"
+            if (verify_loaded_runner_isolation) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'startup guard is missing or unsuccessful' "$fixture/out"
+            mock_startup=''
+            if (verify_loaded_runner_isolation) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'startup guard is missing or unsuccessful' "$fixture/out"
+            if (verify_loaded_runner_isolation before-start) >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'startup guard is missing or unsuccessful' "$fixture/out"
+            """
+        )
+
     def test_forbidden_mysql_option_is_rejected_before_initialization(self):
         self.run_bash(
             self.fixture_preamble()
@@ -538,6 +635,118 @@ PY
             test ! -e "$fixture/opt/joysong-actions-runner"
             """
         )
+
+
+class RunnerMetadataGuardTest(unittest.TestCase):
+    def setUp(self):
+        source = BOOTSTRAP.read_text(encoding="utf-8")
+        helper = source.split("render_runner_metadata_probe() {\n  cat <<'PY'\n", 1)[1].split("\nPY\n}", 1)[0]
+        self.guard = {"__name__": "runner_metadata_test"}
+        exec(compile(helper, "check-runner-metadata.py", "exec"), self.guard)
+
+    def test_denial_requires_successful_application_controls_before_and_after(self):
+        for denial in (TimeoutError(), PermissionError(errno.EPERM, "blocked"),
+                       PermissionError(errno.EACCES, "blocked")):
+            with self.subTest(denial=type(denial).__name__):
+                events = []
+
+                def control():
+                    events.append("application")
+
+                def connect(*args, **kwargs):
+                    events.append("runner")
+                    raise denial
+
+                with mock.patch.object(os, "geteuid", return_value=0, create=True), \
+                        mock.patch.dict(self.guard, application_metadata_available=control), \
+                        mock.patch.object(self.guard["socket"], "create_connection", side_effect=connect) as connection:
+                    self.guard["check_runner_metadata"]()
+                connection.assert_called_once_with(("100.100.100.200", 80), timeout=3)
+                self.assertEqual(events, ["application", "runner", "application"])
+
+    def test_reachable_runner_or_inconclusive_network_error_fails_closed(self):
+        for error in (None, OSError(errno.ENETUNREACH, "no route"),
+                      ConnectionRefusedError(errno.ECONNREFUSED, "refused")):
+            with self.subTest(error=error), \
+                    mock.patch.object(os, "geteuid", return_value=0, create=True), \
+                    mock.patch.dict(self.guard, application_metadata_available=mock.Mock()), \
+                    mock.patch.object(self.guard["socket"], "create_connection", side_effect=error):
+                with self.assertRaises(RuntimeError):
+                    self.guard["check_runner_metadata"]()
+
+    def test_unhealthy_application_before_or_after_timeout_never_passes(self):
+        for outcomes in ([RuntimeError("control unavailable")],
+                         [None, RuntimeError("control unavailable")]):
+            with self.subTest(outcomes=len(outcomes)), \
+                    mock.patch.object(os, "geteuid", return_value=0, create=True), \
+                    mock.patch.dict(self.guard, application_metadata_available=mock.Mock(side_effect=outcomes)), \
+                    mock.patch.object(self.guard["socket"], "create_connection", side_effect=TimeoutError()) as connect:
+                with self.assertRaisesRegex(RuntimeError, "control unavailable"):
+                    self.guard["check_runner_metadata"]()
+                self.assertEqual(connect.call_count, len(outcomes) - 1)
+
+    def test_guard_rejects_unprivileged_execution_before_network_access(self):
+        with mock.patch.object(os, "geteuid", return_value=1001, create=True), \
+                mock.patch.dict(self.guard, application_metadata_available=mock.Mock()) as namespace:
+            with self.assertRaisesRegex(RuntimeError, "requires root"):
+                self.guard["check_runner_metadata"]()
+            namespace["application_metadata_available"].assert_not_called()
+
+    def test_application_control_is_independent_quiet_and_bounded(self):
+        with mock.patch.object(subprocess, "run", return_value=mock.Mock(returncode=0)) as run:
+            self.guard["application_metadata_available"]()
+        control, cleanup = run.call_args_list
+        command = control.args[0]
+        self.assertEqual(command[0], "/usr/bin/systemd-run")
+        self.assertIn("--property=User=joysong-demo", command)
+        self.assertIn("--property=RuntimeMaxSec=12s", command)
+        self.assertNotIn("--scope", command)
+        self.assertEqual(command[-4:], ["/usr/bin/python3", "-I", "-c", self.guard["APP_PROBE"]])
+        for output in ("stdin", "stdout", "stderr"):
+            self.assertEqual(control.kwargs[output], subprocess.DEVNULL)
+        self.assertEqual(control.kwargs["timeout"], 18)
+        self.assertEqual(cleanup.args[0][:2], ["/usr/bin/systemctl", "stop"])
+        self.assertEqual(cleanup.args[0][2], next(arg.split("=", 1)[1] for arg in command if arg.startswith("--unit=")))
+        self.assertEqual(cleanup.kwargs["timeout"], 5)
+
+    def test_application_control_failure_and_timeout_cleanup_then_fail(self):
+        for outcome in (mock.Mock(returncode=1), subprocess.TimeoutExpired("systemd-run", 18)):
+            with self.subTest(outcome=type(outcome).__name__), \
+                    mock.patch.object(subprocess, "run", side_effect=[outcome, mock.Mock(returncode=0)]) as run:
+                with self.assertRaises((RuntimeError, subprocess.TimeoutExpired)):
+                    self.guard["application_metadata_available"]()
+                self.assertEqual(run.call_count, 2)
+                self.assertEqual(run.call_args.args[0][:2], ["/usr/bin/systemctl", "stop"])
+
+    def test_application_probe_uses_imdsv2_role_listing_without_fetching_credentials(self):
+        connection = mock.Mock()
+        connection.getresponse.side_effect = [
+            mock.Mock(status=200, read=mock.Mock(return_value=b"fake-token")),
+            mock.Mock(status=200, read=mock.Mock(return_value=b"joysong-role")),
+        ]
+        with mock.patch("http.client.HTTPConnection", return_value=connection) as http:
+            exec(self.guard["APP_PROBE"], {})
+        http.assert_called_once_with("100.100.100.200", 80, timeout=3)
+        self.assertEqual(connection.request.call_args_list, [
+            mock.call("PUT", "/latest/api/token", headers={"X-aliyun-ecs-metadata-token-ttl-seconds": "60"}),
+            mock.call("GET", "/latest/meta-data/ram/security-credentials/", headers={"X-aliyun-ecs-metadata-token": "fake-token"}),
+        ])
+        connection.close.assert_called_once_with()
+
+    def test_application_probe_rejects_missing_token_or_role_and_closes_connection(self):
+        for status, token, roles in ((403, b"denied", b"role"), (200, b"", b"role"),
+                                     (200, b"t" * 4097, b"role"), (200, b"token", b" \n"),
+                                     (200, b"token", b"r" * 4097)):
+            with self.subTest(status=status, token_length=len(token), role_length=len(roles)):
+                connection = mock.Mock()
+                connection.getresponse.side_effect = [
+                    mock.Mock(status=status, read=mock.Mock(return_value=token)),
+                    mock.Mock(status=200, read=mock.Mock(return_value=roles)),
+                ]
+                with mock.patch("http.client.HTTPConnection", return_value=connection):
+                    with self.assertRaises(ValueError):
+                        exec(self.guard["APP_PROBE"], {})
+                connection.close.assert_called_once_with()
 
 
 if __name__ == "__main__":
