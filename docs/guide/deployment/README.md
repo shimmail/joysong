@@ -116,6 +116,8 @@ Ubuntu 24.04 不安装任何 CentOS/GLIBC 兼容层。接入证据必须同时�
 
 官方归档提供 `bin/runsvc.sh`；bootstrap 按官方 service template 将其复制为根目录 `runsvc.sh`，设置 Runner 属主及 `0755`，继续使用项目的隔离服务单元。重复验收检查源文件与副本一致、权限和属主不漂移。初始化中断且未写入 host contract 时，不直接重跑 fresh 初始化；必须核实准确断点和已有状态后续行，不能删除或重建数据库以满足 fresh 检查。
 
+MySQL 与 mysqldump 共享备份连接配置，但 mysqldump 不支持 `[client]` 中的 `database` 选项。发布入口在 root-only staging 中派生临时配置，只排除此项，并继续通过固定位置参数指定 UAT 数据库；成功后立即移除，失败由既有 staging 清理处理。原受控配置保持不变，密码不进入命令参数或环境变量。
+
 `/usr/local/lib/joysong-deploy/check-runner-metadata.py` 由 bootstrap 生成并以 `root:root 0644` 安装。仅固定 `ExecStartPre=+` 探针以 root 运行，用于向 PID 1 请求独立应用正向检查；Runner 本体仍为 `joysong-gh-runner`。二次初始化精确验证探针内容、加载的拒绝规则、空允许规则、无 drop-in、无需 daemon reload 以及启动探针成功记录。不能通过普通 `runuser` 检查代替同一 systemd cgroup 内的检查。
 
 ### 3.3 root 部署入口
