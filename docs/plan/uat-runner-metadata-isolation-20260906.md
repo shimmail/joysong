@@ -34,3 +34,6 @@
 - PR #8 已合并为 `860f2563`，head 门禁 `34017899619`、merge 门禁 `34017952308` 均成功。
 - 后续实际 apply 已安装 Java 17、MySQL 8、Nginx，创建固定 UAT 空库和系统用户，配对元数据探针通过；在注册前发现官方服务脚本位于 `bin/runsvc.sh`。按官方 service template 的安装方式复制至 Runner 根目录，并验证内容、权限和属主。失败 token 已自动清理，Runner 尚未注册。
 - 对该明确断点，只在已安装文件、归档内容、系统身份、权限、空数据库及无发布状态全部匹配后续行注册和服务安装；不重跑 fresh preflight 或数据库创建，不删除或重置数据库。续行后仍执行完整 host contract 验证与二次 apply 一致性检查。
+- PR #9 已合并为 `3789a884`，head 门禁 `34018489430`、merge 门禁 `34018545714` 均成功；断点续行和二次 apply 验收成功，Runner ID 21 在线且仅具 `joysong-uat-deploy` 标签。
+- 首个 tag `v0.0.1-uat.1` / run `34018740995` 完成 Backend、Admin 构建、安全扫描和 fresh preflight；在首次数据库备份时因 mysqldump 不支持 `[client] database` 被拒绝。后端未启动、数据库表数仍为 0、无 current/previous 或发布事务；失败备份保持 root-only 且没有完成标记。该 tag 不复用，修复后使用新 tag。
+- 备份兼容修复只在受保护 staging 派生排除 `database` 的临时客户端配置，固定数据库参数和原秘密配置不变；验证真实 MySQL 8 客户端备份成功后再发下一候选版本。

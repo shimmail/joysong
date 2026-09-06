@@ -741,6 +741,109 @@ class JoySongUatDeployContractTest(unittest.TestCase):
             """
         )
 
+    def test_dump_filters_mysql_only_database_without_secret_leaks_and_cleans_defaults(self):
+        self.assert_bash_ok(
+            r"""
+            if [[ "$(uname -s)" == MINGW* ]]; then
+              # NTFS does not implement install's Unix ownership/mode handling.
+              install() {
+                if [[ "$1" == -d && "$2" == -m ]]; then
+                  mkdir -p "${@:4}"
+                else
+                  [[ "$1" == -m && "$#" == 4 ]]
+                  cp "$3" "$4"
+                fi
+              }
+            fi
+            python3() {
+              local argument
+              local -a converted=()
+              for argument in "$@"; do
+                if [[ "$argument" == /* && -e "$argument" ]] && command -v cygpath >/dev/null 2>&1; then
+                  converted+=("$(cygpath -w "$argument")")
+                else
+                  converted+=("$argument")
+                fi
+              done
+              "$TEST_PYTHON_BIN" "${converted[@]}"
+            }
+            mkdir -p "$(dirname "$CONFIG_FILE")" "$(dirname "$MYSQL_CONFIG")" "$BACKUP_ROOT" "$STATE_ROOT" "$UPLOADS" "$PRIVATE_DATA" "$STAGING_DATA"
+            printf 'JWT_SECRET=fake-runtime-configuration\n' >"$CONFIG_FILE"
+            cat >"$MYSQL_CONFIG" <<'CNF'
+            [client]
+            host=127.0.0.1
+            port=3306
+            protocol=TCP
+            user=joysong_uat_backup
+            password="not-a-real-secret # equals=colon:backslash\\value"
+            database=myapp_worktree_uat
+            CNF
+            original_cnf_sha="$(file_sha "$MYSQL_CONFIG")"
+            validate_mysql_option_file
+            DATABASE_HOST=127.0.0.1
+            DATABASE_PORT=3306
+            DATABASE_NAME=myapp_worktree_uat
+            DEPLOY_MODE=fresh
+            CURRENT_CONFIG_SHA="$(file_sha "$CONFIG_FILE")"
+            CURRENT_FLYWAY_SHA="$EMPTY_DATABASE_SHA256"
+            CURRENT_NGINX_SHA="$(printf 'a%.0s' {1..64})"
+            CURRENT_SYSTEMD_SHA="$(printf 'b%.0s' {1..64})"
+            CANDIDATE_MIGRATION_SHA="$(printf 'c%.0s' {1..64})"
+            database_state_snapshot() { printf '%s\n' "$EMPTY_DATABASE_SHA256"; }
+            service_stopped_and_port_free() { return 0; }
+            run_with_timeout() { shift; "$@"; }
+            # Exercise real archive/hash handling with portable tar options.
+            tar() {
+              if [[ "$1" == --create ]]; then
+                command tar -czf "$BACKUP_PATH/persistent-data.tar.gz" -C "$DATA_ROOT" uploads private upload-staging
+              else
+                command tar -dzf "$BACKUP_PATH/persistent-data.tar.gz" -C "$DATA_ROOT"
+              fi
+            }
+            mysqldump() {
+              local defaults="${1#--defaults-file=}"
+              if grep -Eq '^[[:space:]]*database[[:space:]]*[:=]' "$defaults"; then
+                printf "mysqldump: [ERROR] unknown variable 'database=myapp_worktree_uat'\n" >&2
+                return 2
+              fi
+              [[ "$1" == --defaults-file=* && "$defaults" == "$STAGING_ROOT/"* && "$defaults" != "$MYSQL_CONFIG" ]] || return 10
+              [[ -f "$defaults" && ! -L "$defaults" && "${!#}" == "$DATABASE_NAME" ]] || return 11
+              cmp <(sed '/^[[:space:]]*database[[:space:]]*[:=]/d' "$MYSQL_CONFIG") "$defaults" || return 12
+              [[ "$*" != *not-a-real-secret* && "$*" != *--password* && -z "${MYSQL_PWD:-}" ]] || return 13
+              if env | grep -qF not-a-real-secret; then return 3; fi
+              if [[ "$(uname -s)" != MINGW* ]]; then
+                [[ "$(stat -c '%a' "$defaults")" == 600 && "$(stat -c '%a' "$STAGING_ROOT")" == 700 ]] || return 14
+              fi
+              printf '%s\n' "$defaults" >"$fixture/used-defaults"
+              if [[ "$dump_failure" == true ]]; then return 4; fi
+              printf -- '-- fixture dump without database selectors\n'
+            }
+            unset MYSQL_PWD
+            if mysqldump --defaults-file="$MYSQL_CONFIG" "$DATABASE_NAME" >"$fixture/original.out" 2>&1; then exit 1; fi
+            grep -q 'unknown variable' "$fixture/original.out"
+            for dump_failure in false true; do
+              STAGING_ROOT="$STATE_ROOT/dump-stage-$dump_failure"
+              mkdir -m 0700 "$STAGING_ROOT"
+              if [[ "$dump_failure" == false ]]; then
+                create_verified_backup v1.2.3-uat.21 "$(printf 'd%.0s' {1..40})"
+                [[ -f "$BACKUP_PATH/BACKUP_COMPLETE" ]]
+                (cd "$BACKUP_PATH" && sha256sum --check --status SHA256SUMS)
+                [[ ! -e "$(cat "$fixture/used-defaults")" ]]
+              else
+                set +e
+                (trap recover_on_failure EXIT; set -e; create_verified_backup v1.2.3-uat.22 "$(printf 'd%.0s' {1..40})") >"$fixture/failure.out" 2>&1
+                status=$?
+                set -e
+                [[ "$status" -ne 0 && ! -e "$STAGING_ROOT" && ! -e "$(cat "$fixture/used-defaults")" ]]
+                grep -q 'database backup failed' "$fixture/failure.out"
+                if grep -qF not-a-real-secret "$fixture/failure.out"; then exit 1; fi
+                [[ -z "$(find "$BACKUP_ROOT" -path '*v1.2.3-uat.22/BACKUP_COMPLETE' -print -quit)" ]]
+              fi
+              [[ "$(file_sha "$MYSQL_CONFIG")" == "$original_cnf_sha" ]]
+            done
+            """
+        )
+
     def test_insufficient_capacity_never_installs_or_stops(self):
         self.assert_bash_ok(
             r"""

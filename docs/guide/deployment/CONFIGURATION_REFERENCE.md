@@ -304,4 +304,6 @@ publish job 不 checkout，通过非秘密 `GH_REPO: ${{ github.repository }}` �
 
 `joysong-uat-backup.cnf` 仅含一个 `[client]` 段；允许键仅为 `host`、`port`、`protocol`、`user`、`password`、`database`。固定 `host=127.0.0.1`、`port=3306`、`protocol=TCP`、`database=myapp_worktree_uat`；user 必须不同于应用账户，password 为独立秘密，不提供其他 MySQL 选项。bootstrap 负责建库和授予最小权限，准备文件本身不应连接数据库。
 
+`database` 用于 mysql 查询绑定，mysqldump 不接受该配置项。发布入口在 root-only staging 生成仅排除这一项的 `0600` 临时配置，并以固定位置参数传入数据库名；不修改原文件，成功及失败路径均清理临时秘密。
+
 两份文件和非秘密选项确认后，执行者先核验本地门禁及远端空白状态，再临时取得本仓库的一次性 registration token，形成恰好三个文件的首次输入。不要提前申请、在聊天中粘贴或用长期 GitHub PAT 代替该 token。秘密仍缺失或发现配置/主机漂移时，在此停止。

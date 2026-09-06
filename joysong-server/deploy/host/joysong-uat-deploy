@@ -754,8 +754,38 @@ install_candidate() {
 
 BACKUP_PATH=''
 
+prepare_mysqldump_option_file() {
+  local dump_config
+  [[ -n "$STAGING_ROOT" && -d "$STAGING_ROOT" && ! -L "$STAGING_ROOT" ]] || fail "backup staging directory is unavailable"
+  dump_config="$(mktemp "$STAGING_ROOT/.mysqldump.XXXXXX.cnf")" || fail "could not create private mysqldump option file"
+  chmod 0600 "$dump_config" || fail "could not protect private mysqldump option file"
+  "$PYTHON_BIN" -I - "$MYSQL_CONFIG" "$dump_config" "$DATABASE_NAME" <<'PY' || fail "mysqldump option preparation failed"
+import configparser, re, sys
+source, destination, database = sys.argv[1:]
+try:
+    with open(source, encoding="utf-8", newline="") as stream:
+        original = stream.read()
+    # Keep credential quoting, backslashes, comments and line endings exactly
+    # as delivered. mysqldump receives its database as a fixed positional arg.
+    filtered = "".join(line for line in original.splitlines(keepends=True)
+                       if not re.match(r"^[ \t]*database[ \t]*[:=]", line, re.IGNORECASE))
+    before = configparser.RawConfigParser(interpolation=None, strict=True)
+    after = configparser.RawConfigParser(interpolation=None, strict=True)
+    before.read_string(original)
+    after.read_string(filtered)
+    expected = dict(before["client"])
+    if expected.pop("database") != database or dict(after["client"]) != expected:
+        raise ValueError("dump option filtering changed unexpected values")
+    with open(destination, "w", encoding="utf-8", newline="") as stream:
+        stream.write(filtered)
+except (OSError, configparser.Error, KeyError, ValueError):
+    raise SystemExit("could not prepare private mysqldump option file") from None
+PY
+  printf '%s' "$dump_config"
+}
+
 create_verified_backup() {
-  local tag="$1" commit="$2" timestamp identity config_sha_after database_after data_before data_after
+  local tag="$1" commit="$2" timestamp identity config_sha_after database_after data_before data_after dump_config
   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
   BACKUP_PATH="$BACKUP_ROOT/${timestamp}-${tag}"
   [[ ! -e "$BACKUP_PATH" && ! -L "$BACKUP_PATH" ]] || fail "backup path already exists"
@@ -769,13 +799,15 @@ create_verified_backup() {
     fail "persistent data backup does not reproduce the live tree metadata and content"
   data_after="$(for directory in "$UPLOADS" "$PRIVATE_DATA" "$STAGING_DATA"; do tree_sha "$directory"; done | sha256sum | awk '{print $1}')"
   [[ "$data_before" == "$data_after" ]] || fail "persistent data changed while it was being backed up"
-  if ! run_with_timeout 150 mysqldump --defaults-file="$MYSQL_CONFIG" --protocol=TCP \
+  dump_config="$(prepare_mysqldump_option_file)"
+  if ! run_with_timeout 150 mysqldump --defaults-file="$dump_config" --protocol=TCP \
       --host="$DATABASE_HOST" --port="$DATABASE_PORT" --single-transaction --quick \
       --routines --triggers --skip-events --hex-blob --default-character-set=utf8mb4 \
       --set-gtid-purged=OFF --no-tablespaces "$DATABASE_NAME" |
       gzip -n >"$BACKUP_PATH/database.sql.gz"; then
-    fail "database backup failed; service remains online"
+    fail "database backup failed; service state is unchanged"
   fi
+  rm -f -- "$dump_config"
   gzip -t "$BACKUP_PATH/database.sql.gz" || fail "database backup gzip verification failed"
   if gzip -cd "$BACKUP_PATH/database.sql.gz" | awk '
       BEGIN { found = 0 }

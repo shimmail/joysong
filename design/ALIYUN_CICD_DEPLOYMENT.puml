@@ -49,7 +49,7 @@ Bootstrap --> HostContract : bind systemd + Nginx templates
 Bootstrap --> Database : create empty database + least privilege accounts
 Bootstrap --> DeployData : create isolated directories
 
-RootDeploy --> DeployData : lock, transaction marker,\nverified backup and identity
+RootDeploy --> DeployData : lock, transaction marker,\nverified backup and identity\nroot-only temporary mysqldump options
 RootDeploy --> BackendReleases : verify and install immutable release
 RootDeploy --> AdminReleases : verify and install immutable release
 RootDeploy --> Service : start / stop / enable
