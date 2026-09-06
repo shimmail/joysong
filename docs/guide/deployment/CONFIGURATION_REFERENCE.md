@@ -2,7 +2,7 @@
 
 > 本文是 [UAT 部署指南](./README.md) 的配置字典，不构成第二套部署流程。
 >
-> 最后核验：2026-09-05
+> 最后核验：2026-09-06
 >
 > 这里只记录键名、语义和安全边界，不记录真实密码、Token、手机号或 AccessKey。
 
@@ -19,7 +19,7 @@
 | GitHub Actions Artifact | 本次 run 的发布制品 | 否，不得包含运行时配置 |
 | Self-hosted Runner 本地配置 | 仓库 Runner 注册和调度 | 仅 GitHub Runner 自管凭据 |
 
-首次 apply 要求 `<secrets-dir>` 必须且只含 `joysong.env`、`joysong-uat-backup.cnf` 和 `runner-registration-token`；三者必须是 `root:root`、`0600` 的单硬链接普通文件。注册成功后 token 被消费并删除，二次 apply 要求目录必须且只含剩余两份输入。任何额外、缺失、链接或多硬链接成员均拒绝。禁止把 ECS 环境文件、数据库导出、应用秘密、TLS 私钥、GitHub Token 或 Runner 凭据提交到 Git、写入 Artifact、Draft Release 或 Issue。
+首次 apply 要求 `<secrets-dir>` 必须且只含 `joysong.env`、`joysong-uat-backup.cnf` 和 `runner-registration-token`；三者必须是 `root:root`、`0600` 的单硬链接普通文件。进入安装事务后 token 在成功或失败退出时清理；首次发布前的二次 apply 要求目录必须且只含剩余两份输入。任何额外、缺失、链接或多硬链接成员均拒绝。禁止把 ECS 环境文件、数据库导出、应用秘密、TLS 私钥、GitHub Token 或 Runner 凭据提交到 Git、写入 Artifact、Draft Release 或 Issue。
 
 ## 2. 环境与服务 identity
 
@@ -72,6 +72,8 @@ UAT 活动数据库名必须精确为 `myapp_worktree_uat`。任何迁移、备�
 
 bootstrap 创建的应用账号只获得该库的数据库级权限且没有 `GRANT OPTION`；独立备份账号只获得该库的 `SELECT`、`SHOW VIEW`、`TRIGGER`、`LOCK TABLES`，以及 `mysqldump --routines` 在 MySQL 8 所需的全局动态 `SHOW_ROUTINE`，并在二次 apply 时精确复核这些授权。
 
+空库系统账号白名单包含 Ubuntu 官方 MySQL 安装器创建的 `debian-sys-maint@localhost`；它不是应用/备份身份，不复用其凭据，也不允许同名远端 Host 或其他未知账号。依据：[Ubuntu Noble MySQL 8.0 安装源码](https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/mysql-8.0/8.0.45-0ubuntu0.24.04.1/mysql-8.0_8.0.45-0ubuntu0.24.04.1.debian.tar.xz)。
+
 固定 Flyway 属性：
 
 | Spring 属性 | 值 |
@@ -91,13 +93,13 @@ fresh preflight 要求无业务表和 Flyway history；首次部署只接受当�
 | 变量 | 敏感 | 当前 UAT 约束 |
 | --- | --- | --- |
 | `JWT_SECRET` | 是 | 只留在 ECS，至少 32 字符 |
-| `ADMIN_PHONE` | 是 | 首次 secrets 提供，不写入发布证据 |
-| `ADMIN_PASSWORD` | 是 | 只允许首次空库临时使用；常规发布不得设置 |
+| `ADMIN_PHONE` | 是 | 精确匹配 `1[0-9]{10}`；首次 secrets 提供，后续保留，不写入发布证据 |
+| `ADMIN_PASSWORD` | 是 | fresh 必须为 12–128 字符；existing 必须彻底移除键，空值也拒绝 |
 | `GOOGLE_CLIENT_ID` | 否 | 当前 UAT 不设置 |
 | `GOOGLE_PROXY_URL` | 否 | 当前 UAT 不设置 |
 | `SMS_ENABLED` | 否 | 当前 UAT 为 `false` |
 
-existing 发布事务不得创建、修改或输出管理员凭据，也不得用部署健康检查替代登录验收。fresh 首次空库仅可用 `ADMIN_PASSWORD` 完成初始化；首次健康成功后必须原子移除该键、受控重启并复验。管理员手机号轮换是独立、可审计的运维动作，不得夹带在后续 tag 发布中。
+existing 发布事务不得创建、修改或输出管理员凭据，也不得用部署健康检查替代登录验收。fresh 首次空库仅可用 `ADMIN_PASSWORD` 完成初始化；首次健康成功后必须分别从安装配置和受控 bootstrap 输入中原子移除该键、保留 owner/mode、受控重启并复验；已有 root-only 备份不改写。bootstrap 在安装前校验首次管理员输入，部署在加载主机/数据库状态前复核 fresh/existing 要求；长度按 Kotlin UTF-16 字符单元计算。管理员手机号轮换是独立、可审计的运维动作，不得夹带在后续 tag 发布中。
 
 ## 6. 持久文件与业务 Bucket
 
@@ -190,7 +192,7 @@ bootstrap-uat-host.sh preflight
 bootstrap-uat-host.sh apply <source-dir> <secrets-dir> <runner-archive> <runner-version> <runner-sha256>
 ```
 
-`preflight` 是严格只读的 fresh-host 检查。`apply` 固定安装 OpenJDK 17、Nginx、MySQL 8、Python 3、curl、unzip、sudo、rsync、iproute2，以及仓库 `systemd/joysong-demo.service` 和 `nginx/joysong-public.conf`。第二次执行只允许复核完全一致的状态；已有未知目标、敏感配置或模板摘要漂移、Runner 不一致均 fail closed。
+`preflight` 是严格只读的 fresh-host 检查，TCP 只允许 SSH 与经服务 PID/可执行文件身份核验的 `systemd-resolved` 本机 DNS。`apply` 固定安装 OpenJDK 17、Nginx、MySQL 8.0、Python 3、curl、unzip、sudo、rsync、iproute2，以及仓库 `systemd/joysong-demo.service` 和 `nginx/joysong-public.conf`；版本校验接受 Ubuntu 的 `mysql Ver 8.0.x` 输出，不接受 MariaDB 或 MySQL 8.4。第二次执行仅用于首次发布前的完全一致性复核，不是发布后的配置修复入口；已有未知目标、敏感配置或模板摘要漂移、Runner 不一致均 fail closed。
 
 ### 10.2 Runner 固定值
 
@@ -201,6 +203,8 @@ bootstrap-uat-host.sh apply <source-dir> <secrets-dir> <runner-archive> <runner-
 | 版本/平台 | 官方 Linux x64 `v2.337.0` |
 | archive SHA-256 | `70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613` |
 | 标签 | 以 `--no-default-labels` 注册，只保留 `joysong-uat-deploy` |
+| 自动更新 | `--disableupdate`，禁止注册后静默偏离已批准版本；更新须另行校验 archive/version/hash |
+| 注册 identity | `.runner` 中正整数 `agentId`、固定 `agentName`/`gitHubUrl`/`workFolder`，且 `disableUpdate=true`；二次 apply 拒绝漂移 |
 | 应用组 | 不加入 `joysong-demo`、`www-data` 或其他应用组 |
 | 云凭据 | 无 |
 | 应用秘密 | 无，且不能读 `/etc/joysong-demo/joysong.env` |
@@ -210,7 +214,9 @@ bootstrap-uat-host.sh apply <source-dir> <secrets-dir> <runner-archive> <runner-
 | deploy job | 永久纯 shell、零 `uses:`；不得启动内置 Node 20/24 Action runtime |
 | online 门禁 | Listener `2.337.0`、service active、GitHub Runner API `online` |
 
-Runner 注册 token 是一次性接入材料，只能位于受控 `<secrets-dir>/runner-registration-token`，由 root 读取并在注册成功后删除。不得提交、写入 workflow、保存到 Issue、通过 argv 传入或长期记录在 shell history。
+Runner 注册 token 是一次性接入材料，只能位于受控 `<secrets-dir>/runner-registration-token`。注册前核验 Listener 版本；root 读取 token 并通过受控 PTY 响应隐藏提示，不通过 `--token`、Runner 环境变量或普通 stdin 管道。终端输出不转发，重复提示、超时或注册失败即终止；进入安装事务后成功或失败退出均清理 token。不得提交、写入 workflow、保存到 Issue 或长期记录在 shell history。
+
+固定版本不是无限期免更新：执行前必须再次确认 GitHub 仍接受该版本；版本到期或安全更新导致不调度时停止，先更新批准基线和校验摘要，不通过开启静默更新绕过契约。维护规则见 [GitHub Self-hosted runners reference](https://docs.github.com/en/actions/reference/runners/self-hosted-runners#runner-software-updates-on-self-hosted-runners)。
 
 ## 11. GitHub Actions 配置
 
@@ -233,6 +239,8 @@ Runner 注册 token 是一次性接入材料，只能位于受控 `<secrets-dir>
 
 Self-hosted deploy job 不得获得 `contents: write`、`issues: write`、OIDC `id-token: write` 或云 AccessKey。
 该 job 还必须保持零 `uses:`；下载本次 Artifact、校验和调用固定入口全部使用仓库中受校验的纯 shell 契约。
+
+publish job 不 checkout，通过非秘密 `GH_REPO: ${{ github.repository }}` 固定 GitHub CLI 的仓库上下文；其 `GH_TOKEN` 仅为 GitHub 自动签发的 job token，不是 ECS 应用秘密或 Runner 注册 token。
 
 ### 11.3 当前不需要的旧配置
 
@@ -272,3 +280,21 @@ Self-hosted deploy job 不得获得 `contents: write`、`issues: write`、OIDC `
 4. 若行为变化，同时更新权威部署指南。
 
 不得通过把真实值写进仓库来修复缺失配置。
+
+## 14. 首次秘密交付准备
+
+2026-09-06 用户确认两份持久文件尚未准备；当前只允许本地开发和远端只读核验，不运行 bootstrap apply、不注册 Runner、不创建 UAT tag。
+
+先在仓库之外准备受控目录，向执行者仅提供目录路径，不粘贴内容。Windows 本地输入用 ACL 限定本人及必要管理员访问；交付到 ECS 后目录必须为 `root:root 0700`，文件为 `root:root 0600`、普通单硬链接文件。不要把开发 `.env.example` 直接作为 UAT 配置：其中数据库名、路径和业务开关不构成本主机契约。
+
+`joysong.env` 使用 UTF-8、逐行 `KEY=value`，不加 `export`，不重复键、不放多行值，不依赖 shell 插值；秘密建议采用不含空白、引号或反斜杠的随机 ASCII 值，以避免 systemd 和校验器转义语义差异。最少确认：
+
+- 固定值：`SPRING_PROFILES_ACTIVE=demo`、`SERVER_ADDRESS=127.0.0.1`、`SERVER_PORT=8080`、`DEMO_DATABASE_NAME=myapp_worktree_uat`；`DB_URL=jdbc:mysql://127.0.0.1:3306/myapp_worktree_uat`，不得请求自动建库。
+- 秘密：独立应用账户 `DB_USERNAME`/`DB_PASSWORD`、至少 32 字符的 `JWT_SECRET`、有效 `ADMIN_PHONE`、12–128 字符首次 `ADMIN_PASSWORD`。不使用开发或生产凭据。
+- 持久目录：`UPLOAD_LOCAL_DIR=/var/lib/joysong-demo/uploads`、`UPLOAD_STAGING_DIR=/var/lib/joysong-demo/upload-staging`、`UPLOAD_PRIVATE_DIR=/var/lib/joysong-demo/private`。
+- 安全开关：`SMS_ENABLED=false`、`DEMO_DATA_ENABLED=false`、`ALIPAY_PLUS_AUTO_PAY_ON_ORDER_CREATE_ENABLED=false`、`PAYMENT_RECONCILIATION_ENABLED=false`、`STRIPE_LEGACY_ENABLED=false`；不配置 Demo seed、Google 或未启用能力的秘密。
+- 待明确的非秘密选项：`TZ`、公网 origin/分享地址/精确 CORS、`OSS_ENABLED`、`PRIVATE_FILE_STORAGE_MODE`、AI/翻译 endpoint/model、模拟支付开关。它们须由负责人确认，不从旧分支或旧主机恢复。若选择 OSS，先确认既有授权和凭据模式，不创建或修改实例角色/Bucket；选择本地存储或关闭 AI 也不能声称相关业务已验收。
+
+`joysong-uat-backup.cnf` 仅含一个 `[client]` 段；允许键仅为 `host`、`port`、`protocol`、`user`、`password`、`database`。固定 `host=127.0.0.1`、`port=3306`、`protocol=TCP`、`database=myapp_worktree_uat`；user 必须不同于应用账户，password 为独立秘密，不提供其他 MySQL 选项。bootstrap 负责建库和授予最小权限，准备文件本身不应连接数据库。
+
+两份文件和非秘密选项确认后，执行者先核验本地门禁及远端空白状态，再临时取得本仓库的一次性 registration token，形成恰好三个文件的首次输入。不要提前申请、在聊天中粘贴或用长期 GitHub PAT 代替该 token。秘密仍缺失或发现配置/主机漂移时，在此停止。

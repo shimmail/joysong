@@ -546,9 +546,11 @@ def validate_uat_candidate(path: Path, text: str, errors: list[str]) -> None:
         (
             "needs: [build, deploy]",
             "permissions:\n      actions: read\n      contents: write\n      issues: write",
+            "GH_REPO: ${{ github.repository }}",
             "actions/download-artifact@",
             "gh release",
             "gh issue",
+            "ADMIN_PASSWORD 已从运行时配置和 bootstrap 输入中原子移除",
         ),
         errors,
     )

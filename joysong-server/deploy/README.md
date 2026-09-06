@@ -65,6 +65,8 @@ Runner 不能读取 `/etc/joysong-demo/joysong.env`、`/etc/mysql/joysong-uat-ba
 
 Runner 固定为官方 Linux x64 `v2.337.0`，archive SHA-256 为 `70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613`；以 `--no-default-labels` 注册且只保留 `joysong-uat-deploy` 标签。Ubuntu 24.04 不使用 CentOS/GLIBC 兼容层。Listener 版本、service active 和 GitHub API online 未全部验证前不得推送 UAT tag。
 
+注册同时使用 `--disableupdate`，二次 apply 校验 `.runner` 的仓库、名称、工作目录和更新策略；版本维护必须更新批准基线，不允许静默漂移。
+
 ## Bootstrap 接口
 
 ```text
@@ -72,14 +74,14 @@ bootstrap-uat-host.sh preflight
 bootstrap-uat-host.sh apply <source-dir> <secrets-dir> <runner-archive> <runner-version> <runner-sha256>
 ```
 
-`preflight` 只读验证 Ubuntu 24.04 空白主机。首次 `apply` 要求 secrets 目录必须且只含 `joysong.env`、`joysong-uat-backup.cnf`、`runner-registration-token` 三个 `root:root`、`0600` 单硬链接普通文件；token 注册后删除，第二次 apply 要求目录必须且只含剩余两份输入，只复核完全一致的安装状态。任何已有未知资源、敏感配置或模板摘要漂移均 fail closed。
+`preflight` 只读验证 Ubuntu 24.04 空白主机，TCP 限 SSH 及经进程身份验证的 `systemd-resolved` 本机 DNS。首次 `apply` 要求 secrets 目录必须且只含 `joysong.env`、`joysong-uat-backup.cnf`、`runner-registration-token` 三个 `root:root`、`0600` 单硬链接普通文件；Runner token 通过受控 PTY 输入隐藏提示，不进入 argv/环境/日志，安装事务退出时清理。首次发布前的第二次 apply 要求目录必须且只含剩余两份输入，只复核完全一致的安装状态。任何已有未知资源、敏感配置或模板摘要漂移均 fail closed。
 
 ## 主机事务摘要
 
 - **fresh**：无 current/previous、服务 inactive/disabled、数据库无业务表/Flyway history。preflight 不停服务；deploy 先备份空状态，再安装 pair并允许当前 JAR 建立成功的 B33 与 V34…V40。失败且 Flyway 为空时恢复可重试空状态；Flyway 变化或未知时保持 stopped/disabled 和事务标记。
 - **existing**：验证健康 current pair、MainPID/8080、成功的 B33 与 V34…V40 以及相同 migration digest；在线完成包/容量/备份校验后进入最长 180 秒停机，成对切换或在 Flyway 未变化时成对回滚 previous。
 
-首次成功没有 previous；下一 tag 自动进入 existing。首次健康成功后还必须原子移除 `ADMIN_PASSWORD`、受控重启并再次验收。
+fresh 要求有效管理员手机号及 12–128 字符的 `ADMIN_PASSWORD`；existing 拒绝密码键（包括空值）。首次成功没有 previous；下一 tag 自动进入 existing。首次健康成功后还必须从运行时配置和受控 bootstrap 输入中原子移除 `ADMIN_PASSWORD`、受控重启并再次验收。
 
 ## 历史或未来资产
 

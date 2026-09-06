@@ -4,7 +4,7 @@
 >
 > 适用范围：已换为 Ubuntu 24.04 的空白阿里云 ECS 初始化与 UAT Candidate 发布
 >
-> 最后核验：2026-09-05
+> 最后核验：2026-09-06
 >
 > 配置字典：[CONFIGURATION_REFERENCE.md](./CONFIGURATION_REFERENCE.md)
 
@@ -21,7 +21,7 @@ GitHub-hosted Runner
   -> joysong-demo.service 健康检查与自动回滚
 ```
 
-目标 ECS 已完成系统盘切换并经 Workbench 只读核验：Ubuntu 24.04.4 LTS、x86_64、systemd 255，2 vCPU、约 3.4 GiB 内存，40 GB 根盘约 36 GB 可用；当前仅 SSH 监听，JoySong 用户、服务、Runner、部署目录及 MySQL 凭据文件均不存在。它必须按 **fresh host** 初始化，任何新增或无法解释的状态都会阻断写操作。
+目标 ECS 已完成系统盘切换并经 2026-09-06 Workbench 只读复核：Ubuntu 24.04.4 LTS、x86_64、systemd 255，2 vCPU、约 3.4 GiB 内存，40 GB 根盘约 35 GB 可用；TCP 监听为 SSH 与 `systemd-resolved` 的 `127.0.0.53/54:53` 本机 DNS，JoySong 用户、服务、Runner、部署目录及 MySQL 凭据文件均不存在。它必须按 **fresh host** 初始化，任何新增或无法解释的状态都会阻断写操作。秘密尚未准备，目前没有远端初始化或首次发布证据；此快照不替代执行前复核。
 
 初始化后的固定运行边界为：
 
@@ -98,6 +98,7 @@ GitHub-hosted Runner 负责所有不需要主机访问的工作：
 
 - Runner 以非 root 用户运行，禁止交互登录；
 - 使用 `--no-default-labels` 注册，不加入 `joysong-demo`、`www-data`、Docker、sudo 等应用或特权组；
+- 使用 `--disableupdate` 固定已批准版本；版本到期或必需安全更新时停止发布并单独更新基线，不让 Runner 静默升级；
 - 不得读取 `/etc/joysong-demo/joysong.env`；
 - 不保存数据库、OSS、阿里云、JWT、AI、翻译或其他应用秘密；
 - 不配置通用 `linux`、`x64` 调度标签，deploy job 只指定 `joysong-uat-deploy`；
@@ -191,6 +192,8 @@ workflow 必须依次：
 8. 返回 GitHub-hosted Runner，创建或更新私有 Draft Release。
 9. 创建不含移动端项目的 UAT 验收 Issue，状态写为“UAT Candidate 已部署，公网未 Ready”。
 
+publish job 不 checkout 仓库，必须通过 `GH_REPO: ${{ github.repository }}` 显式绑定所有 `gh release/issue/label` 操作的目标。
+
 部署并发组固定为 `uat-deployment`，`cancel-in-progress: false`。失败 tag 永不复用；修复后必须递增 UAT 序号。
 
 ## 6. 发布包契约
@@ -221,9 +224,9 @@ manifest 至少绑定 `schemaVersion`、tag、完整 commit、run/build ID、JAR
 bootstrap-uat-host.sh preflight
 ```
 
-该操作只能读取并确认 Ubuntu 24.04、x86_64、systemd、资源、监听以及全部固定目标尚不存在。失败后不得用删除、覆盖或放宽检查的方式继续。
+该操作只能读取并确认 Ubuntu 24.04、x86_64、systemd、资源、监听以及全部固定目标尚不存在。TCP 仅允许 SSH，以及通过服务进程身份核验的 `systemd-resolved` 本机 DNS；不允许其他进程、外网 DNS 或任意业务监听。失败后不得用删除、覆盖或放宽检查的方式继续。
 
-准备受控源目录、官方 Linux x64 Runner archive，以及首次执行时必须且只含下列三个 `root:root`、`0600` 单硬链接普通文件的 secrets 目录：
+先按[首次秘密交付准备](./CONFIGURATION_REFERENCE.md#14-首次秘密交付准备)确认运行时配置；只交付受控路径，不在对话粘贴值。准备受控源目录、官方 Linux x64 Runner archive，以及首次执行时必须且只含下列三个 `root:root`、`0600` 单硬链接普通文件的 secrets 目录：
 
 ```text
 joysong.env
@@ -238,7 +241,7 @@ bootstrap-uat-host.sh apply <source-dir> <secrets-dir> <runner-archive> \
   2.337.0 70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613
 ```
 
-`apply` 从 `joysong-server/deploy/systemd/joysong-demo.service` 与 `joysong-server/deploy/nginx/joysong-public.conf` 安装固定模板，并安装依赖、用户、目录、host-contract、MySQL 数据库/账号、部署入口、Runner service 和最小 sudoers。注册 token 读取后删除；秘密不通过 argv 或日志传递。安装后验证 `www-data`、`myapp_worktree_uat`、Runner 版本/唯一标签/API online 及权限隔离，再以必须且只含 `joysong.env` 与 `joysong-uat-backup.cnf` 的同一目录执行第二次完全一致的 `apply` 复核。不得通过云 AccessKey、应用秘密或扩大 sudo 权限绕过失败。
+`apply` 从 `joysong-server/deploy/systemd/joysong-demo.service` 与 `joysong-server/deploy/nginx/joysong-public.conf` 安装固定模板，并安装依赖、用户、目录、host-contract、MySQL 数据库/账号、部署入口、Runner service 和最小 sudoers。先验证 Runner 版本，再由 root 通过受控 PTY 响应隐藏 token 提示；不使用 token argv、环境变量或普通 stdin 管道，不输出注册终端内容，超时即失败。进入安装事务后 token 在成功或失败退出时清理；失败保留状态，不能自动重试覆盖。安装后验证 `www-data`、`myapp_worktree_uat`、Runner 版本/唯一标签/API online 及权限隔离，再于首次发布前以必须且只含 `joysong.env` 与 `joysong-uat-backup.cnf` 的同一目录执行第二次完全一致的 `apply` 复核。发布后不把 bootstrap 当配置修复入口。不得通过云 AccessKey、应用秘密或扩大 sudo 权限绕过失败。
 
 ## 8. 部署事务
 
@@ -247,6 +250,8 @@ bootstrap-uat-host.sh apply <source-dir> <secrets-dir> <runner-archive> \
 ### 8.1 fresh
 
 fresh preflight 要求 Backend/Admin current 与 previous 均不存在，服务 inactive/disabled，8080 无监听，`myapp_worktree_uat` 无业务表和 Flyway history。它只读校验 Artifact、配置、模板/host-contract 摘要、容量和端口，全程不得启动或停止服务。
+
+fresh 同时要求有效 `ADMIN_PHONE` 与 12–128 字符的首次 `ADMIN_PASSWORD`，缺失或重复配置在加载主机/数据库状态前拒绝，避免先迁移再因管理员初始化失败停服。bootstrap 在安装前执行相同输入要求；这不是对所有业务运行时选项的完整校验。
 
 fresh deploy 先备份空库 identity、环境配置和必要持久目录并校验摘要，再安装不可变 Backend/Admin pair、写事务标记并启动 `joysong-demo.service`。健康成功只接受数据库已形成成功的 `B33 + V34…V40`；随后切换 Admin current、验证本机 `/` 与 `/orders`、enable 服务并提交 release state。首次部署没有 previous pair。
 
@@ -258,7 +263,7 @@ existing preflight 要求健康 current pair、服务 active/enabled、MainPID �
 
 existing deploy 写 root-only 事务标记后进入最长 180 秒停机预算，原子切换 Backend、验证服务/MainPID/JAR/8080/health/Flyway，再切换并验证 Admin，最后记录完整 previous pair。Flyway 未变化才允许自动恢复旧 pair；Flyway 变化或未知时保持停服和事务标记。Admin 失败必须成对恢复，不能只恢复一端。
 
-首次健康成功后，下一 tag 必须自动进入 existing 路径。首次成功还必须原子移除 `ADMIN_PASSWORD`、受控重启并再次完成相同健康检查。
+首次健康成功后，下一 tag 必须自动进入 existing 路径。首次成功还必须从安装环境文件及受控 bootstrap 输入中分别原子移除 `ADMIN_PASSWORD`，保留 owner/mode、不输出值；受控重启并再次完成相同健康检查。existing preflight 拒绝仍存在该键的配置（即使为空），但保留并验证 `ADMIN_PHONE`。首次配置备份仍按 root-only 边界保管，不因去密而改写备份证据。
 
 ## 9. Migration 与恢复门禁
 

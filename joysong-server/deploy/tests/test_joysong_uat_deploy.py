@@ -435,6 +435,65 @@ class JoySongUatDeployContractTest(unittest.TestCase):
             """
         )
 
+    def test_admin_secret_contract_blocks_state_loading_without_leaking_values(self):
+        self.assert_bash_ok(
+            r"""
+            python3() {
+              if command -v cygpath >/dev/null 2>&1; then
+                "$TEST_PYTHON_BIN" "$1" "$2" "$(cygpath -w "$3")" "$4"
+              else
+                "$TEST_PYTHON_BIN" "$@"
+              fi
+            }
+            mkdir -p "$(dirname "$CONFIG_FILE")"
+            operations="$fixture/operations"
+            : >"$operations"
+            mode=fresh
+            classify_deployment_mode() { DEPLOY_MODE="$mode"; }
+            load_fresh_state() { printf 'fresh\n' >>"$operations"; }
+            load_current_state() { printf 'existing\n' >>"$operations"; }
+            write_config() {
+              printf 'ADMIN_PHONE=13800000000\n' >"$CONFIG_FILE"
+              if [[ "$1" != absent ]]; then
+                printf 'ADMIN_PASSWORD=%s\n' "$1" >>"$CONFIG_FILE"
+              fi
+            }
+            expect_rejection() {
+              : >"$operations"
+              if (load_deployment_state) >"$fixture/output" 2>&1; then
+                echo 'unsafe administrator configuration was accepted' >&2
+                exit 1
+              fi
+              [[ ! -s "$operations" ]]
+              ! grep -Fq 'not-a-real-admin-password' "$fixture/output"
+              ! grep -Fq '13800000000' "$fixture/output"
+            }
+
+            for password in absent '' short ' not-a-real-admin-password' 'not-a-real-admin-password '; do
+              write_config "$password"
+              expect_rejection
+            done
+            write_config not-a-real-admin-password
+            printf 'ADMIN_PASSWORD=not-a-real-duplicate-password\n' >>"$CONFIG_FILE"
+            expect_rejection
+            write_config not-a-real-admin-password
+            printf 'ADMIN_PHONE=invalid\n' >>"$CONFIG_FILE"
+            expect_rejection
+            write_config not-a-real-admin-password
+            load_deployment_state
+            [[ "$(cat "$operations")" == fresh ]]
+
+            mode=existing
+            for password in not-a-real-admin-password ''; do
+              write_config "$password"
+              expect_rejection
+            done
+            write_config absent
+            load_deployment_state
+            [[ "$(cat "$operations")" == existing ]]
+            """
+        )
+
     def test_fresh_preflight_is_read_only_and_reports_mode(self):
         self.assert_bash_ok(
             r"""

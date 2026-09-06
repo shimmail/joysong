@@ -222,6 +222,34 @@ port_is_free() {
   fi
 }
 
+validate_tcp_listeners() {
+  local listeners address port process_info resolved_pid resolved_executable saw_ssh=false
+  command -v ss >/dev/null || fail "ss is required for the listener preflight"
+  listeners="$(ss -H -ltnp)" || fail "TCP listeners cannot be inspected"
+  while read -r address process_info; do
+    [[ -n "$address" ]] || continue
+    port="${address##*:}"
+    if [[ "$port" == 22 ]]; then
+      saw_ssh=true
+      continue
+    fi
+    case "$address" in
+      127.0.0.53%lo:53|127.0.0.53:53|127.0.0.54:53)
+        resolved_pid="$(systemctl show systemd-resolved.service -p MainPID --value)" ||
+          fail "systemd-resolved identity cannot be inspected"
+        [[ "$resolved_pid" =~ ^[1-9][0-9]*$ && "$process_info" == *"pid=$resolved_pid,"* ]] ||
+          fail "loopback DNS listener does not belong to systemd-resolved"
+        resolved_executable="$(readlink "$(host_path "/proc/$resolved_pid/exe")")" ||
+          fail "systemd-resolved executable cannot be inspected"
+        [[ "$resolved_executable" == /usr/lib/systemd/systemd-resolved ]] ||
+          fail "loopback DNS listener has an unexpected executable"
+        ;;
+      *) fail "unexpected listening TCP port before bootstrap: $port" ;;
+    esac
+  done < <(awk '{printf "%s", $4; for (i=6; i<=NF; i++) printf " %s", $i; print ""}' <<<"$listeners")
+  [[ "$saw_ssh" == true ]] || fail "SSH listener is missing"
+}
+
 validate_platform() {
   local os_release version link_target
   os_release="$(host_path /etc/os-release)"
@@ -243,7 +271,7 @@ validate_platform() {
 }
 
 validate_blank_host() {
-  local path service listeners address port saw_ssh=false
+  local path service
   for service in "$APP_SERVICE" "$RUNNER_SERVICE"; do
     [[ "$(service_state "$service" active)" != active ]] || fail "$service is already active"
     [[ "$(service_state "$service" enabled)" != enabled ]] || fail "$service is already enabled"
@@ -259,15 +287,7 @@ validate_blank_host() {
   port_is_free 3306 || fail "TCP port 3306 is already in use"
   port_is_free 8080 || fail "TCP port 8080 is already in use"
   if [[ "$TEST_MODE" == false ]]; then
-    command -v ss >/dev/null || fail "ss is required for the listener preflight"
-    listeners="$(ss -H -ltn)" || fail "TCP listeners cannot be inspected"
-    while read -r address; do
-      [[ -n "$address" ]] || continue
-      port="${address##*:}"
-      [[ "$port" == 22 ]] || fail "unexpected listening TCP port before bootstrap: $port"
-      saw_ssh=true
-    done < <(awk '{print $4}' <<<"$listeners")
-    [[ "$saw_ssh" == true ]] || fail "SSH listener is missing"
+    validate_tcp_listeners
   fi
 }
 
@@ -358,6 +378,15 @@ if "createdatabaseifnotexist" in url.lower():
     raise SystemExit("DB_URL must not create a database")
 if len(values["JWT_SECRET"]) < 32:
     raise SystemExit("JWT_SECRET must contain at least 32 characters")
+if not re.fullmatch(r"1[0-9]{10}", values.get("ADMIN_PHONE", "")):
+    raise SystemExit("first release requires a valid ADMIN_PHONE")
+password = values.get("ADMIN_PASSWORD", "")
+if len(password) >= 2 and password[0] in ("'", '"') and password[-1] == password[0]:
+    password = password[1:-1]
+if password != password.strip():
+    raise SystemExit("ADMIN_PASSWORD must not contain leading or trailing whitespace")
+if not 12 <= len(password.encode("utf-16-le")) // 2 <= 128:
+    raise SystemExit("first release requires ADMIN_PASSWORD with 12 to 128 characters")
 PY
 }
 
@@ -424,6 +453,11 @@ if members == 0:
 PY
 }
 
+verify_mysql_versions() {
+  mysql --version | grep -Eq '(^|[[:space:]])Ver 8\.0\.[0-9]+' || fail "MySQL 8 client is unavailable"
+  mysqld --version | grep -Eq '(^|[[:space:]])Ver 8\.0\.[0-9]+' || fail "MySQL 8 server is unavailable"
+}
+
 install_packages() {
   if [[ "$TEST_MODE" == true ]]; then
     install_directory root root 0700 "$(host_path /run)"
@@ -435,8 +469,7 @@ install_packages() {
   apt-get update
   apt-get install -y --no-install-recommends openjdk-17-jre-headless nginx mysql-server mysql-client python3 curl unzip sudo rsync iproute2 ca-certificates
   [[ "$(java -version 2>&1 | sed -n '1s/.*version "\([0-9]*\).*/\1/p')" == 17 ]] || fail "OpenJDK 17 is unavailable"
-  mysql --version | grep -Eq 'Distrib 8\.0\.' || fail "MySQL 8 client is unavailable"
-  mysqld --version | grep -Eq 'Ver 8\.0\.' || fail "MySQL 8 server is unavailable"
+  verify_mysql_versions
   systemctl enable --now mysql
 }
 
@@ -447,22 +480,27 @@ prepare_nginx_default() {
   rm -- "$NGINX_DEFAULT"
 }
 
-provision_database() {
-  if [[ "$TEST_MODE" == true ]]; then
-    install_directory root root 0700 "$(host_path /var/lib/mysql)"
-    printf '%s\n' "$DATABASE_NAME" >"$(host_path /var/lib/mysql/joysong-bootstrap-database)"
-    return
-  fi
+validate_mysql_initial_state() {
   local unexpected_schemas unexpected_accounts
-  printf 'Resolved database host: 127.0.0.1\nResolved database name: %s\n' "$DATABASE_NAME"
   unexpected_schemas="$(mysql --protocol=socket --user=root --batch --skip-column-names --execute="
     SELECT SCHEMA_NAME FROM information_schema.SCHEMATA
     WHERE SCHEMA_NAME NOT IN ('information_schema','mysql','performance_schema','sys') LIMIT 1;")"
   [[ -z "$unexpected_schemas" ]] || fail "fresh MySQL contains an unexpected non-system database"
   unexpected_accounts="$(mysql --protocol=socket --user=root --batch --skip-column-names --execute="
     SELECT User FROM mysql.user
-    WHERE NOT ((User='root' AND Host='localhost') OR User IN ('mysql.infoschema','mysql.session','mysql.sys')) LIMIT 1;")"
+    WHERE NOT (Host='localhost' AND User IN
+      ('root','debian-sys-maint','mysql.infoschema','mysql.session','mysql.sys')) LIMIT 1;")"
   [[ -z "$unexpected_accounts" ]] || fail "fresh MySQL contains an unexpected account"
+}
+
+provision_database() {
+  if [[ "$TEST_MODE" == true ]]; then
+    install_directory root root 0700 "$(host_path /var/lib/mysql)"
+    printf '%s\n' "$DATABASE_NAME" >"$(host_path /var/lib/mysql/joysong-bootstrap-database)"
+    return
+  fi
+  printf 'Resolved database host: 127.0.0.1\nResolved database name: %s\n' "$DATABASE_NAME"
+  validate_mysql_initial_state
   "$PYTHON_BIN" -I - "$1" "$2" "$DATABASE_NAME" <<'PY' | mysql --protocol=socket --user=root
 import configparser, re, sys
 environment_path, backup_path, database = sys.argv[1:]
@@ -571,8 +609,97 @@ PY
   [[ "$grantable_count" == 0 ]] || fail "UAT MySQL account has grant authority"
 )
 
+register_runner_with_token() {
+  # v2.337.0 Terminal.ReadSecret uses Console.ReadKey(intercept: true), so it
+  # requires a PTY. The root parent supplies only the fixed secret prompt;
+  # neither a command argument nor the runner environment contains the token.
+  "$PYTHON_BIN" -I - "$1" "$RUNNER_ROOT_PATH" "$RUNNER_HOME_PATH" "$RUNNER_USER" \
+    "$REPOSITORY_URL" "$RUNNER_NAME" "$RUNNER_LABEL" "$RUNNER_HOME" <<'PY'
+import errno, os, pty, pwd, select, signal, sys, termios, time
+
+token_path, runner_root, runner_home, runner_user, repository, name, label, work = sys.argv[1:]
+with open(token_path, "rb") as stream:
+    raw_token = stream.read(258)
+if len(raw_token) > 257:
+    raise SystemExit("registration token file is malformed")
+token = raw_token.rstrip(b"\r\n")
+raw_token = b""
+if not 20 <= len(token) <= 255 or any(value <= 32 or value >= 127 for value in token):
+    raise SystemExit("registration token file is malformed")
+command = ["./config.sh", "--url", repository, "--name", name, "--labels", label,
+           "--no-default-labels", "--disableupdate", "--runnergroup", "Default", "--work", work]
+environment = {"HOME": runner_home, "PATH": "/usr/local/bin:/usr/bin:/bin", "TERM": "dumb"}
+prompt = b"What is your runner register token? "
+pid, terminal = pty.fork()
+if pid == 0:
+    try:
+        attributes = termios.tcgetattr(0)
+        attributes[3] &= ~(termios.ECHO | termios.ECHONL)
+        termios.tcsetattr(0, termios.TCSANOW, attributes)
+        if os.geteuid() == 0:
+            account = pwd.getpwnam(runner_user)
+            os.initgroups(runner_user, account.pw_gid)
+            os.setgid(account.pw_gid)
+            os.setuid(account.pw_uid)
+        os.chdir(runner_root)
+        os.execve(command[0], command, environment)
+    except BaseException:
+        os._exit(126)
+
+sent = False
+collected = b""
+output_size = 0
+status = None
+deadline = time.monotonic() + 180
+try:
+    attributes = termios.tcgetattr(terminal)
+    attributes[3] &= ~(termios.ECHO | termios.ECHONL)
+    termios.tcsetattr(terminal, termios.TCSANOW, attributes)
+    while time.monotonic() < deadline:
+        if select.select([terminal], [], [], 0.2)[0]:
+            try:
+                chunk = os.read(terminal, 4096)
+            except OSError as error:
+                if error.errno != errno.EIO:
+                    raise
+                chunk = b""
+            if chunk:
+                output_size += len(chunk)
+                if output_size > 1024 * 1024:
+                    raise RuntimeError("output limit")
+                collected += chunk
+                if prompt in collected:
+                    if sent:
+                        raise RuntimeError("repeated token prompt")
+                    os.write(terminal, token + b"\n")
+                    token = b""
+                    sent = True
+                    collected = b""
+                else:
+                    collected = collected[-8192:]
+        finished, candidate = os.waitpid(pid, os.WNOHANG)
+        if finished:
+            status = candidate
+            break
+    if status is None or not sent or not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0:
+        raise RuntimeError("registration failed")
+except BaseException:
+    # Raw terminal output is deliberately never forwarded, including failures.
+    raise SystemExit("runner hidden-input registration failed; inspect the protected runner diagnostics") from None
+finally:
+    token = b""
+    os.close(terminal)
+    if status is None:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        os.waitpid(pid, 0)
+PY
+}
+
 extract_and_register_runner() {
-  local archive="$1" token_file="$2" version="$3" expected_sha="$4" actual_version registration_token
+  local archive="$1" token_file="$2" version="$3" expected_sha="$4" actual_version
   install_directory root root 0700 "$RUNNER_ROOT_PATH"
   [[ "$(sha256sum "$archive" | awk '{print $1}')" == "$expected_sha" ]] || fail "runner archive changed before extraction"
   tar --extract --gzip --file "$archive" --directory "$RUNNER_ROOT_PATH" --no-same-owner --no-same-permissions
@@ -581,22 +708,21 @@ extract_and_register_runner() {
   [[ -f "$RUNNER_ROOT_PATH/bin/Runner.Listener" && ! -L "$RUNNER_ROOT_PATH/bin/Runner.Listener" ]] || fail "runner listener is missing"
   [[ -f "$RUNNER_ROOT_PATH/config.sh" && ! -L "$RUNNER_ROOT_PATH/config.sh" ]] || fail "runner config.sh is missing"
   [[ -f "$RUNNER_ROOT_PATH/runsvc.sh" && ! -L "$RUNNER_ROOT_PATH/runsvc.sh" ]] || fail "runner runsvc.sh is missing"
-  registration_token="$(tr -d '\r\n' <"$token_file")"
-  [[ "${#registration_token}" -ge 20 && "${#registration_token}" -le 255 && "$registration_token" != *[[:space:]]* ]] || fail "registration token file is malformed"
   if [[ "$TEST_MODE" == true ]]; then
     actual_version="$("$RUNNER_ROOT_PATH/bin/Runner.Listener" --version)"
-    (cd "$RUNNER_ROOT_PATH" && ./config.sh --unattended --url "$REPOSITORY_URL" --token "$registration_token" \
-      --name "$RUNNER_NAME" --labels "$RUNNER_LABEL" --no-default-labels --work "$RUNNER_HOME")
   else
     actual_version="$(runuser -u "$RUNNER_USER" -- /usr/bin/env -i HOME="$RUNNER_HOME" \
       PATH=/usr/local/bin:/usr/bin:/bin "$RUNNER_ROOT/bin/Runner.Listener" --version)"
-    cd "$RUNNER_ROOT"
-    runuser -u "$RUNNER_USER" -- /usr/bin/env -i HOME="$RUNNER_HOME" PATH=/usr/local/bin:/usr/bin:/bin \
-      ./config.sh --unattended --url "$REPOSITORY_URL" --token "$registration_token" --name "$RUNNER_NAME" \
-      --labels "$RUNNER_LABEL" --no-default-labels --work "$RUNNER_HOME"
   fi
-  registration_token=''
   [[ "$actual_version" == "$version" ]] || fail "runner archive version differs from the approved version"
+  if [[ "$TEST_MODE" == true ]]; then
+    # Portable layout fixture; the production PTY transport has its own Linux
+    # tests that call register_runner_with_token without bypassing that function.
+    (cd "$RUNNER_ROOT_PATH" && ./config.sh --url "$REPOSITORY_URL" \
+      --name "$RUNNER_NAME" --labels "$RUNNER_LABEL" --no-default-labels --disableupdate --work "$RUNNER_HOME" <"$token_file")
+  else
+    register_runner_with_token "$token_file"
+  fi
   rm -f -- "$token_file"
 }
 
@@ -695,6 +821,42 @@ EOF
   nginx -t >/dev/null
 }
 
+verify_runner_registration() {
+  local expected_registration
+  require_regular_file "$RUNNER_ROOT_PATH/.runner" "runner registration"
+  # A JSON value keeps the Windows fixture shell from rewriting workFolder as
+  # a Windows path while still passing the same production identity contract.
+  expected_registration="$(printf '{"agentName":"%s","gitHubUrl":"%s","workFolder":"%s","disableUpdate":true}' \
+    "$RUNNER_NAME" "$REPOSITORY_URL" "$RUNNER_HOME")"
+  "$PYTHON_BIN" -I - "$RUNNER_ROOT_PATH/.runner" "$expected_registration" <<'PY'
+import json, sys
+path, expected_document = sys.argv[1:]
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate field")
+        result[key] = value
+    return result
+try:
+    with open(path, encoding="utf-8-sig") as stream:
+        document = stream.read(65537)
+    if len(document) > 65536:
+        raise ValueError("oversized registration")
+    registration = json.loads(document, object_pairs_hook=unique_object)
+    if not isinstance(registration, dict):
+        raise ValueError("invalid registration")
+    if type(registration.get("agentId")) is not int or registration["agentId"] <= 0:
+        raise ValueError("invalid agent identity")
+    expected = json.loads(expected_document)
+    if any(type(registration.get(key)) is not type(value) or registration[key] != value
+           for key, value in expected.items()):
+        raise ValueError("registration identity mismatch")
+except (OSError, ValueError):
+    raise SystemExit("runner registration identity drifted") from None
+PY
+}
+
 verify_host_contract() {
   local source_dir="$1" secrets_dir="$2" archive="$3" version="$4" sha="$5" expected
   validate_platform
@@ -726,7 +888,7 @@ verify_host_contract() {
   verify_system_user "$APP_USER" /var/lib/joysong-demo
   verify_system_user "$RUNNER_USER" "$RUNNER_HOME"
   verify_nginx_identity
-  require_regular_file "$RUNNER_ROOT_PATH/.runner" "runner registration"
+  verify_runner_registration
   [[ "$(service_state mysql.service active)" == active ]] || fail "MySQL is not active"
   [[ "$(service_state mysql.service enabled)" == enabled ]] || fail "MySQL is not enabled"
   [[ "$(service_state nginx.service active)" == active ]] || fail "Nginx is not active"
