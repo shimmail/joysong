@@ -433,9 +433,23 @@ validate_runner_archive() {
   [[ "$sha" == "$expected_sha" ]] || fail "runner SHA-256 must match the approved release"
   [[ "$(sha256sum "$archive" | awk '{print $1}')" == "$sha" ]] || fail "runner archive SHA-256 mismatch"
   "$PYTHON_BIN" -I - "$archive" <<'PY'
-import pathlib, sys, tarfile
+import pathlib, posixpath, sys, tarfile
 members = 0
 expanded = 0
+# The pinned official release bundles exactly these Node CLI symlinks. Keep
+# their relative targets explicit instead of allowing arbitrary archive links.
+approved_links = {
+    "externals/{}/bin/{}".format(node, command): "../lib/node_modules/" + target
+    for node in ("node20", "node24")
+    for command, target in (
+        ("corepack", "corepack/dist/corepack.js"),
+        ("npm", "npm/bin/npm-cli.js"),
+        ("npx", "npm/bin/npx-cli.js"),
+    )
+}
+paths = set()
+regular_files = set()
+links = {}
 with tarfile.open(sys.argv[1], mode="r|gz") as stream:
     for member in stream:
         members += 1
@@ -445,12 +459,28 @@ with tarfile.open(sys.argv[1], mode="r|gz") as stream:
             raise SystemExit("runner archive exceeds resource limits")
         if not member.name or path.is_absolute() or ".." in path.parts or "\\" in member.name:
             raise SystemExit("runner archive contains an unsafe path")
-        if member.isdev() or member.isfifo() or member.issym() or member.islnk():
+        name = path.as_posix()
+        if name in paths:
+            raise SystemExit("runner archive contains a duplicate path")
+        paths.add(name)
+        if member.issym():
+            if member.size != 0 or approved_links.get(name) != member.linkname:
+                raise SystemExit("runner archive contains an unapproved symbolic link")
+            links[name] = posixpath.normpath(posixpath.join(str(path.parent), member.linkname))
+            continue
+        if member.isdev() or member.isfifo() or member.islnk():
             raise SystemExit("runner archive contains a link or special member")
         if not (member.isdir() or member.isfile()):
             raise SystemExit("runner archive contains an unsupported member")
+        if member.isfile():
+            regular_files.add(name)
 if members == 0:
     raise SystemExit("runner archive is empty")
+for name in paths:
+    if any(parent.as_posix() in links for parent in pathlib.PurePosixPath(name).parents):
+        raise SystemExit("runner archive contains a member beneath a symbolic link")
+if any(target not in regular_files for target in links.values()):
+    raise SystemExit("runner archive symbolic link target is not a regular file")
 PY
 }
 
@@ -1048,7 +1078,12 @@ apply_fresh() {
   require_input_file "$secrets_dir/joysong-uat-backup.cnf" "database backup secret input"
   token_file="$secrets_dir/runner-registration-token"
   require_input_file "$token_file" "runner registration token"
-  trap '[[ -z "${token_file:-}" ]] || rm -f -- "$token_file"' EXIT INT TERM
+  # EXIT can run after this function's locals leave scope. Freeze only the
+  # shell-escaped path, never the token value, while the local still exists.
+  # shellcheck disable=SC2064
+  trap "rm -f -- $(printf '%q' "$token_file")" EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   validate_environment_file "$secrets_dir/joysong.env"
   validate_mysql_option_file "$secrets_dir/joysong-uat-backup.cnf" "$secrets_dir/joysong.env"
   validate_runner_archive "$archive" "$version" "$sha"

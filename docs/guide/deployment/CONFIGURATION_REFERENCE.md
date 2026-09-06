@@ -202,6 +202,7 @@ bootstrap-uat-host.sh apply <source-dir> <secrets-dir> <runner-archive> <runner-
 | 用户 | `joysong-gh-runner`，nologin，非 root |
 | 版本/平台 | 官方 Linux x64 `v2.337.0` |
 | archive SHA-256 | `70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613` |
+| 官方归档链接 | 固定摘要之外，仅允许 `externals/node20`、`externals/node24` 的 `bin/corepack`、`bin/npm`、`bin/npx` 指向各自包内固定普通文件；拒绝其他链接、重复路径、链接子路径或缺失目标。应用发布包的链接禁令不变 |
 | 标签 | 以 `--no-default-labels` 注册，只保留 `joysong-uat-deploy` |
 | 自动更新 | `--disableupdate`，禁止注册后静默偏离已批准版本；更新须另行校验 archive/version/hash |
 | 注册 identity | `.runner` 中正整数 `agentId`、固定 `agentName`/`gitHubUrl`/`workFolder`，且 `disableUpdate=true`；二次 apply 拒绝漂移 |
@@ -216,6 +217,8 @@ bootstrap-uat-host.sh apply <source-dir> <secrets-dir> <runner-archive> <runner-
 | online 门禁 | Listener `2.337.0`、service active、GitHub Runner API `online` |
 
 Runner 注册 token 是一次性接入材料，只能位于受控 `<secrets-dir>/runner-registration-token`。注册前核验 Listener 版本；root 读取 token 并通过受控 PTY 响应隐藏提示，不通过 `--token`、Runner 环境变量或普通 stdin 管道。终端输出不转发，重复提示、超时或注册失败即终止；进入安装事务后成功或失败退出均清理 token。不得提交、写入 workflow、保存到 Issue 或长期记录在 shell history。
+
+退出清理在安装事务入口固定经过 shell 转义的 token 文件路径，避免函数局部变量退出作用域后遗漏清理；INT/TERM 通过退出触发同一清理。钩子只含路径，不含 token 值。失败后检查主机状态并重新申请短期注册 token，不复用失败事务输入中的旧 token。
 
 元数据探针固定安装在 `/usr/local/lib/joysong-deploy/check-runner-metadata.py`，由 bootstrap 内嵌模板生成，要求 `root:root 0644`。只有固定启动探针使用 `ExecStartPre=+`，不会给 Runner 开放通用 root 命令。正向检查仅读取 token 和角色名称，不请求角色凭据正文；不新增应用环境变量，不改变现有 ECS 实例角色或 Bucket 权限。
 

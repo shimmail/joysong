@@ -28,3 +28,6 @@
 - ShellCheck 对 Git/Linux 使用的 LF 字节流检查通过；工作区 CRLF 及 Windows text-mode stdin 会触发 SC1017，检查采用二进制输入避免换行转换。
 - ECS 临时服务实证：`ExecStartPre=+` 保留 Runner 的 IP 拒绝规则，应用 IMDSv2 前后成功、Runner 连接被阻断，探针退出 0；fresh-host preflight 通过。
 - 官方 Runner 归档初次下载截断，续传后大小 `226430031` 字节及固定 SHA-256 均匹配，未修改批准版本或摘要。
+- PR #7 已合并为 `d3cfeaba`，head 门禁 `34017142293`、merge 门禁 `34017207382` 均成功。
+- 实际 apply 在安装依赖前暴露官方归档六个合法工具符号链接与旧全拒绝校验器冲突；同时发现 EXIT 钩子依赖失效的局部路径导致 token 未清理。已删除遗留 token，数据库、应用与 Runner 尚未安装；后续提交精确放行固定链接并冻结退出清理路径，补负向回归后重新过门禁。
+- 归档及失败清理修复的 9 项新增/修改定向测试通过（4.784 秒），固定官方完整归档通过只读校验，ShellCheck 通过；不重复本地全量测试，Linux CI 继续验证合并准入。
