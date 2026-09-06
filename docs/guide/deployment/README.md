@@ -112,6 +112,8 @@ GitHub-hosted Runner 负责所有不需要主机访问的工作：
 
 Ubuntu 24.04 不安装任何 CentOS/GLIBC 兼容层。接入证据必须同时包含 `Runner.Listener --version == 2.337.0`、Runner service active 和 GitHub Runner API `online`；未全部通过前不得推送 UAT tag。ECS deploy job 仍固定为纯 shell、零 `uses:`，以缩小第三方 Action 在主机上的执行面。
 
+官方 Runner 固定归档包含 Node 20/24 的六个工具符号链接。校验器仅放行其精确路径与目标，并要求目标为包内普通文件、无重复路径和链接子路径；其他链接仍拒绝。此例外不适用于应用发布包。
+
 `/usr/local/lib/joysong-deploy/check-runner-metadata.py` 由 bootstrap 生成并以 `root:root 0644` 安装。仅固定 `ExecStartPre=+` 探针以 root 运行，用于向 PID 1 请求独立应用正向检查；Runner 本体仍为 `joysong-gh-runner`。二次初始化精确验证探针内容、加载的拒绝规则、空允许规则、无 drop-in、无需 daemon reload 以及启动探针成功记录。不能通过普通 `runuser` 检查代替同一 systemd cgroup 内的检查。
 
 ### 3.3 root 部署入口
@@ -226,6 +228,8 @@ manifest 至少绑定 `schemaVersion`、tag、完整 commit、run/build ID、JAR
 ```text
 bootstrap-uat-host.sh preflight
 ```
+
+从 Windows 生成受控源码归档时使用 `git -c core.autocrlf=false archive`，确保文件字节与批准提交的 LF blob 一致。Ubuntu 解包后，源目录及祖先必须 root-owned 且不可被组或其他用户写入；Git 归档的目录可能带 `0775`，须先收紧权限再运行 bootstrap，不能通过降低路径校验绕过。
 
 该操作只能读取并确认 Ubuntu 24.04、x86_64、systemd、资源、监听以及全部固定目标尚不存在。TCP 仅允许 SSH，以及通过服务进程身份核验的 `systemd-resolved` 本机 DNS；不允许其他进程、外网 DNS 或任意业务监听。失败后不得用删除、覆盖或放宽检查的方式继续。
 

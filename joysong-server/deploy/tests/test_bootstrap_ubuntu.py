@@ -2,8 +2,12 @@ from __future__ import print_function
 
 import os
 import errno
+import io
 import shutil
 import subprocess
+import sys
+import tarfile
+import tempfile
 import textwrap
 import unittest
 from pathlib import Path
@@ -184,7 +188,7 @@ SERVICE
             "SYSTEMD_UNIT_SHA256=%s\\nNGINX_SITE_SHA256=%s\\n",
             "--no-default-labels",
             'tarfile.open(sys.argv[1], mode="r|gz")',
-            "member.isdev() or member.isfifo() or member.issym() or member.islnk()",
+            "member.isdev() or member.isfifo() or member.islnk()",
             "GRANT SHOW_ROUTINE ON *.*",
             '[[ "$global_privileges" == SHOW_ROUTINE ]]',
         ):
@@ -438,6 +442,29 @@ PY
             """
         )
 
+    def test_failed_admin_or_archive_validation_removes_registration_token(self):
+        self.run_bash(
+            self.fixture_preamble()
+            + self.apply_fixture()
+            + r"""
+            mv "$secrets" "$fixture/secrets with spaces"
+            secrets="$fixture/secrets with spaces"
+            cp "$secrets/joysong.env" "$fixture/original-env"
+            sed -i '/^ADMIN_PASSWORD=/d' "$secrets/joysong.env"
+            if "$bootstrap" apply "$source_dir" "$secrets" "$archive" 2.337.0 "$runner_sha" >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'requires ADMIN_PASSWORD' "$fixture/out"
+            test ! -e "$secrets/runner-registration-token" || { echo 'failed admin validation retained token' >&2; exit 1; }
+            cp "$fixture/original-env" "$secrets/joysong.env"
+            printf 'not-a-real-registration-token-value\n' >"$secrets/runner-registration-token"
+            chmod 0600 "$secrets/runner-registration-token"
+            if "$bootstrap" apply "$source_dir" "$secrets" "$archive" 2.337.0 invalid-sha >"$fixture/out" 2>&1; then exit 1; fi
+            grep -q 'SHA-256 must match the approved release' "$fixture/out"
+            test ! -e "$secrets/runner-registration-token" || { echo 'failed archive validation retained token' >&2; exit 1; }
+            test ! -e "$fixture/run/joysong-bootstrap-packages"
+            if grep -q 'not-a-real-registration-token-value' "$fixture/out"; then exit 1; fi
+            """
+        )
+
     def test_apply_initializes_once_and_second_apply_only_verifies(self):
         self.run_bash(
             self.fixture_preamble()
@@ -635,6 +662,95 @@ PY
             test ! -e "$fixture/opt/joysong-actions-runner"
             """
         )
+
+
+class RunnerArchiveValidationTest(unittest.TestCase):
+    def setUp(self):
+        source = BOOTSTRAP.read_text(encoding="utf-8").split("validate_runner_archive() {\n", 1)[1]
+        self.validator = source.split("<<'PY'\n", 1)[1].split("\nPY\n}", 1)[0]
+
+    @staticmethod
+    def official_members():
+        links = []
+        targets = []
+        for node in ("node20", "node24"):
+            for command, target in (("corepack", "corepack/dist/corepack.js"),
+                                    ("npm", "npm/bin/npm-cli.js"),
+                                    ("npx", "npm/bin/npx-cli.js")):
+                links.append(("externals/{}/bin/{}".format(node, command), tarfile.SYMTYPE,
+                              "../lib/node_modules/" + target))
+                targets.append(("externals/{}/lib/node_modules/{}".format(node, target), tarfile.REGTYPE, ""))
+        return links, targets
+
+    def validate_members(self, members):
+        with tempfile.TemporaryDirectory(prefix="joysong-runner-archive-") as directory:
+            path = Path(directory) / "runner.tar.gz"
+            with tarfile.open(str(path), "w:gz") as archive:
+                for name, kind, target in members:
+                    member = tarfile.TarInfo(name)
+                    member.type = kind
+                    member.linkname = target
+                    payload = b"fixture" if kind == tarfile.REGTYPE else b""
+                    member.size = len(payload)
+                    archive.addfile(member, io.BytesIO(payload))
+            return subprocess.run(
+                [sys.executable, "-I", "-", str(path)], input=self.validator,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8", timeout=15,
+            )
+
+    def assert_rejected(self, members, message):
+        result = self.validate_members(members)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(message, result.stderr)
+
+    def test_official_node20_and_node24_links_are_accepted_in_either_order(self):
+        links, targets = self.official_members()
+        for members in (links + targets, targets + links):
+            with self.subTest(first_member=members[0][0]):
+                prefixed = [("./" + name, kind, target) for name, kind, target in members]
+                result = self.validate_members(prefixed)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_arbitrary_link_names_or_targets_are_rejected(self):
+        links, targets = self.official_members()
+        for name, target in (("bin/unsafe", "../outside"),
+                             (links[0][0], "/etc/passwd"),
+                             (links[0][0], "../../../../outside"),
+                             (links[0][0], "../lib/node_modules/npm/bin/npm-cli.js")):
+            with self.subTest(name=name, target=target):
+                self.assert_rejected([(name, tarfile.SYMTYPE, target)] + targets,
+                                     "unapproved symbolic link")
+
+    def test_duplicate_normalized_paths_are_rejected(self):
+        links, targets = self.official_members()
+        for members in ([targets[0], ("./" + targets[0][0], tarfile.REGTYPE, "")],
+                        [("bin/", tarfile.DIRTYPE, ""), ("./bin", tarfile.DIRTYPE, "")],
+                        links + [links[0]] + targets):
+            with self.subTest(first_member=members[0][0]):
+                self.assert_rejected(members, "duplicate path")
+
+    def test_members_beneath_links_are_rejected_regardless_of_order(self):
+        links, targets = self.official_members()
+        child = (links[0][0] + "/injected.js", tarfile.REGTYPE, "")
+        for members in ([child] + links + targets, links + targets + [child]):
+            with self.subTest(child_first=members[0] == child):
+                self.assert_rejected(members, "member beneath a symbolic link")
+
+    def test_approved_links_require_existing_regular_targets(self):
+        links, targets = self.official_members()
+        for members in ([links[0]], [links[0], (targets[0][0], tarfile.DIRTYPE, "")]):
+            with self.subTest(target_present=len(members) == 2):
+                self.assert_rejected(members, "symbolic link target is not a regular file")
+
+    def test_hardlinks_and_special_members_remain_rejected(self):
+        for kind in (tarfile.LNKTYPE, tarfile.FIFOTYPE, tarfile.CHRTYPE, tarfile.BLKTYPE):
+            with self.subTest(kind=kind):
+                self.assert_rejected([("unsafe", kind, "target")], "link or special member")
+
+    def test_unsafe_member_paths_remain_rejected(self):
+        for name in ("/absolute", "../outside", "safe/../../outside", "safe\\outside"):
+            with self.subTest(name=name):
+                self.assert_rejected([(name, tarfile.REGTYPE, "")], "unsafe path")
 
 
 class RunnerMetadataGuardTest(unittest.TestCase):
