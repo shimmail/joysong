@@ -37,3 +37,6 @@
 - PR #9 已合并为 `3789a884`，head 门禁 `34018489430`、merge 门禁 `34018545714` 均成功；断点续行和二次 apply 验收成功，Runner ID 21 在线且仅具 `joysong-uat-deploy` 标签。
 - 首个 tag `v0.0.1-uat.1` / run `34018740995` 完成 Backend、Admin 构建、安全扫描和 fresh preflight；在首次数据库备份时因 mysqldump 不支持 `[client] database` 被拒绝。后端未启动、数据库表数仍为 0、无 current/previous 或发布事务；失败备份保持 root-only 且没有完成标记。该 tag 不复用，修复后使用新 tag。
 - 备份兼容修复只在受保护 staging 派生排除 `database` 的临时客户端配置，固定数据库参数和原秘密配置不变；验证真实 MySQL 8 客户端备份成功后再发下一候选版本。
+- PR #10 已合并为 `06b333de`，head 门禁 `34019242839`、merge 门禁 `34019334091` 均成功。ECS 使用派生配置完成真实 MySQL 8 空库导出和 gzip 校验，更新后的主机契约复核成功。
+- `v0.0.1-uat.2` / run `34019458732` 已完成备份、B33 + V34…V40 全部迁移、应用约 20 秒启动和管理员初始化；部署器健康等待超时后停用服务并保留事务，Backend current 保留、Admin current 尚无。数据库已迁移，不再具备 fresh 条件，禁止重建或清空以重试。
+- 监听门禁原先整行搜索 IPv4 文本，无法识别 Java 的 IPv4-mapped IPv6 回环表示。修复只接受精确本地回环地址及同一 MainPID 的独占监听；恢复必须先核对原事务、制品、备份、配置和完整迁移历史，失败保留数据库与事务。旧 workflow 失败事实保留，恢复后的下一 tag 走 existing 正常发布。

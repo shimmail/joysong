@@ -92,6 +92,7 @@ note bottom of RootDeploy
   fresh: no previous; empty Flyway may become B33 + V34...V40.
   fresh requires initial admin credentials; existing forbids ADMIN_PASSWORD.
   existing: migration digest must match; max downtime is 180 seconds.
+  Listener: exact IPv4 or mapped IPv6 loopback, one MainPID owner.
   Any unexpected Flyway change keeps the service stopped
   with the transaction marker for manual recovery.
 end note

@@ -741,6 +741,50 @@ class JoySongUatDeployContractTest(unittest.TestCase):
             """
         )
 
+    def test_listener_identity_accepts_only_exact_loopback_and_exclusive_mainpid(self):
+        self.assert_bash_ok(
+            r"""
+            python3() { "$TEST_PYTHON_BIN" "$@"; }
+            run_with_timeout() { shift; "$@"; }
+            ss_status=0
+            ss() {
+              [[ "$*" == '-H -ltnp sport = :8080' ]] || return 2
+              cat "$fixture/listener"
+              return "$ss_status"
+            }
+            for address in 127.0.0.1:8080 '[::ffff:127.0.0.1]:8080' '[::ffff:7f00:1]:8080'; do
+              printf 'LISTEN 0 100 %s *:* users:(("java",pid=123,fd=10))\n' "$address" >"$fixture/listener"
+              listener_owned_by_pid 123 || { printf 'valid listener rejected: %s\n' "$address" >&2; exit 1; }
+            done
+            for line in \
+              'LISTEN 0 100 127.0.0.1:8081 *:* users:(("java",pid=123,fd=10))' \
+              'LISTEN 0 100 127.0.0.1:80800 *:* users:(("java",pid=123,fd=10))' \
+              'LISTEN 0 100 0.0.0.0:8080 *:* users:(("java",pid=123,fd=10))' \
+              'LISTEN 0 100 [::]:8080 *:* users:(("java",pid=123,fd=10))' \
+              'LISTEN 0 100 *:8080 *:* users:(("java",pid=123,fd=10))' \
+              'LISTEN 0 100 [::1]:8080 *:* users:(("java",pid=123,fd=10))' \
+              'LISTEN 0 100 127.0.0.2:8080 *:* users:(("java",pid=123,fd=10))' \
+              'LISTEN 0 100 [::ffff:127.0.0.2]:8080 *:* users:(("java",pid=123,fd=10))' \
+              'LISTEN 0 100 127.0.0.1:8080 *:* users:(("java",pid=124,fd=10))' \
+              'LISTEN 0 100 127.0.0.1:8080 *:* users:(("java",pid=123,fd=10),("other",pid=124,fd=11))' \
+              'LISTEN 0 100 127.0.0.1:8080 *:*' \
+              'LISTEN 0 100 0.0.0.0:8080 127.0.0.1:8080 users:(("java",pid=123,fd=10))' \
+              'LISTEN 0 100 10.0.0.1:8080 *:* users:(("127.0.0.1:8080",pid=123,fd=10))' \
+              'ESTAB 0 100 127.0.0.1:8080 *:* users:(("java",pid=123,fd=10))'; do
+              printf '%s\n' "$line" >"$fixture/listener"
+              if listener_owned_by_pid 123; then printf 'unsafe listener accepted: %s\n' "$line" >&2; exit 1; fi
+            done
+            printf 'LISTEN 0 100 127.0.0.1:8080 *:* users:(("java",pid=123,fd=10))\n' >"$fixture/single"
+            cat "$fixture/single" "$fixture/single" >"$fixture/listener"
+            if listener_owned_by_pid 123; then echo 'multiple listeners accepted' >&2; exit 1; fi
+            : >"$fixture/listener"
+            if listener_owned_by_pid 123; then echo 'missing listener accepted' >&2; exit 1; fi
+            cp "$fixture/single" "$fixture/listener"
+            ss_status=1
+            if listener_owned_by_pid 123; then echo 'failed ss inspection accepted' >&2; exit 1; fi
+            """
+        )
+
     def test_dump_filters_mysql_only_database_without_secret_leaks_and_cleans_defaults(self):
         self.assert_bash_ok(
             r"""

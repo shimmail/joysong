@@ -452,8 +452,30 @@ mainpid_jar() {
 listener_owned_by_pid() {
   local pid="$1" output
   output="$(run_with_timeout "$COMMAND_TIMEOUT_SECONDS" ss -H -ltnp "sport = :$PORT")" || return 1
-  [[ "$(wc -l <<<"$output" | tr -d ' ')" == 1 ]] || return 1
-  [[ "$output" == *"127.0.0.1:$PORT"* && "$output" == *"pid=$pid,"* ]]
+  "$PYTHON_BIN" -I -c '
+import ipaddress, re, sys
+try:
+    pid, port = sys.argv[1:]
+    lines = sys.stdin.read().splitlines()
+    if not re.fullmatch(r"[1-9][0-9]*", pid) or len(lines) != 1:
+        raise ValueError()
+    fields = lines[0].split(None, 5)
+    if len(fields) != 6 or fields[0] != "LISTEN":
+        raise ValueError()
+    host, separator, local_port = fields[3].rpartition(":")
+    if not separator or local_port != port:
+        raise ValueError()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    address = ipaddress.ip_address(host)
+    if isinstance(address, ipaddress.IPv6Address):
+        address = address.ipv4_mapped
+    owners = set(re.findall(r"\bpid=([0-9]+),", fields[5]))
+    if address != ipaddress.IPv4Address("127.0.0.1") or owners != {pid}:
+        raise ValueError()
+except ValueError:
+    raise SystemExit(1) from None
+' "$pid" "$PORT" <<<"$output"
 }
 
 CURRENT_BACKEND=''
