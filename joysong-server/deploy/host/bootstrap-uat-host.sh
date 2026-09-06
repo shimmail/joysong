@@ -734,6 +734,11 @@ extract_and_register_runner() {
   install_directory root root 0700 "$RUNNER_ROOT_PATH"
   [[ "$(sha256sum "$archive" | awk '{print $1}')" == "$expected_sha" ]] || fail "runner archive changed before extraction"
   tar --extract --gzip --file "$archive" --directory "$RUNNER_ROOT_PATH" --no-same-owner --no-same-permissions
+  require_regular_file "$RUNNER_ROOT_PATH/bin/runsvc.sh" "runner service script source"
+  [[ ! -e "$RUNNER_ROOT_PATH/runsvc.sh" && ! -L "$RUNNER_ROOT_PATH/runsvc.sh" ]] || fail "runner service script destination already exists"
+  # Official bin/systemd.svc.sh.template installs this wrapper in the runner
+  # root; the archive only contains bin/runsvc.sh. Preserve our hardened unit.
+  install_file "$RUNNER_USER" "$RUNNER_USER" 0755 "$RUNNER_ROOT_PATH/bin/runsvc.sh" "$RUNNER_ROOT_PATH/runsvc.sh"
   if [[ "$TEST_MODE" == false ]]; then chown -R "$RUNNER_USER:$RUNNER_USER" "$RUNNER_ROOT_PATH"; fi
   chmod 0755 "$RUNNER_ROOT_PATH"
   [[ -f "$RUNNER_ROOT_PATH/bin/Runner.Listener" && ! -L "$RUNNER_ROOT_PATH/bin/Runner.Listener" ]] || fail "runner listener is missing"
@@ -940,10 +945,14 @@ verify_installed_layout() {
   require_root_protected_file "$DEPLOY_ROOT/state/deploy.lock" 600 "deployment lock"
   require_root_protected_file "$RUNNER_UNIT" 644 "runner unit"
   [[ "$(cat "$RUNNER_UNIT")" == "$(render_runner_unit)" ]] || fail "runner unit drifted"
+  require_regular_file "$RUNNER_ROOT_PATH/bin/runsvc.sh" "runner service script source"
+  require_regular_file "$RUNNER_ROOT_PATH/runsvc.sh" "runner service script"
+  cmp -s "$RUNNER_ROOT_PATH/bin/runsvc.sh" "$RUNNER_ROOT_PATH/runsvc.sh" || fail "runner service script content drifted"
   verify_runner_metadata_isolation
   verify_loaded_runner_isolation
   [[ "$(cat "$SUDOERS")" == "$(render_sudoers)" ]] || fail "runner sudoers content drifted"
   if [[ "$TEST_MODE" == true ]]; then return; fi
+  [[ "$(stat -c '%a' "$RUNNER_ROOT_PATH/runsvc.sh")" == 755 ]] || fail "runner service script mode drifted"
   while IFS='|' read -r path expected; do
     [[ "$(stat -c '%U:%G:%a' "$path")" == "$expected" ]] || fail "installed directory metadata drifted: $path"
   done <<EOF
@@ -964,6 +973,7 @@ $DEPLOY_ROOT/incoming|$RUNNER_USER:$RUNNER_USER:700
 $RUNNER_HOME_PATH|$RUNNER_USER:$RUNNER_USER:700
 EOF
   [[ "$(stat -c '%U:%G:%a' "$RUNNER_ROOT_PATH")" == "$RUNNER_USER:$RUNNER_USER:755" ]] || fail "runner root metadata drifted"
+  [[ "$(stat -c '%U:%G' "$RUNNER_ROOT_PATH/runsvc.sh")" == "$RUNNER_USER:$RUNNER_USER" ]] || fail "runner service script ownership drifted"
   [[ "$(systemctl show "$RUNNER_SERVICE" -p User --value)" == "$RUNNER_USER" ]] || fail "runner service user drifted"
   [[ "$(runuser -u "$RUNNER_USER" -- /usr/bin/env -i HOME="$RUNNER_HOME" PATH=/usr/local/bin:/usr/bin:/bin \
     "$RUNNER_ROOT/bin/Runner.Listener" --version)" == "$EXPECTED_RUNNER_VERSION" ]] ||
