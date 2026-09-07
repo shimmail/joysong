@@ -8,7 +8,7 @@ final class LoginStrings {
 
   final bool isEnglish;
 
-  String get brandTitle => isEnglish ? 'JoySong' : '娇颜颂';
+  String get brandTitle => isEnglish ? 'JOYINGSONG' : '娇颜颂';
   String get passwordLogin => isEnglish ? 'Password sign-in' : '密码登录';
   String get codeLogin => isEnglish ? 'Code sign-in' : '验证码登录';
   String get passwordSubtitle =>

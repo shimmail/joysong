@@ -6,8 +6,14 @@ import 'package:joysong_flutter/features/auth/domain/auth_models.dart';
 import 'package:joysong_flutter/features/auth/domain/auth_repository.dart';
 import 'package:joysong_flutter/features/auth/presentation/auth_controller.dart';
 import 'package:joysong_flutter/features/auth/presentation/login_page.dart';
+import 'package:joysong_flutter/features/auth/presentation/login_strings.dart';
 
 void main() {
+  test('brand title follows the selected language', () {
+    expect(const LoginStrings(isEnglish: true).brandTitle, 'JOYINGSONG');
+    expect(const LoginStrings(isEnglish: false).brandTitle, '娇颜颂');
+  });
+
   test('registration and code sending errors follow the selected language', () async {
     var english = true;
     final controller = AuthController(
