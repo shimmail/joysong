@@ -238,7 +238,7 @@ class _JoysongAppState extends State<JoysongApp> {
             child: MaterialApp(
               onGenerateTitle: (context) =>
                   _localeController.language == AppLanguage.english
-                      ? 'Joysong'
+                      ? 'JoySong'
                       : '娇颜颂',
               debugShowCheckedModeBanner:
                   widget.environment.flavor == AppFlavor.development,

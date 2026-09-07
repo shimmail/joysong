@@ -11,7 +11,8 @@
       <env name="TEMP" value="D:\code\kotlin\joysong\.flutter-cache\temp" />
       <env name="TMP" value="D:\code\kotlin\joysong\.flutter-cache\temp" />
     </envs>
-    <option name="additionalArgs" value="--dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://10.0.2.2:8080" />
+    <option name="additionalArgs" value="--flavor development --dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://10.0.2.2:8080" />
+    <option name="buildFlavor" value="development" />
     <option name="filePath" value="$PROJECT_DIR$/lib/main.dart" />
     <method v="2" />
   </configuration>

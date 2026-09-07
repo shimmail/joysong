@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
+import 'package:joysong_flutter/features/agent/presentation/agent_error_message.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_controller.dart';
 
 class AgentProfileSafetyPage extends StatefulWidget {
@@ -344,7 +345,10 @@ class _ErrorNotice extends StatelessWidget {
   Widget build(BuildContext context) => Semantics(
         liveRegion: true,
         child: Text(
-          message,
+          agentErrorMessage(
+            message,
+            isEnglish: Localizations.localeOf(context).languageCode == 'en',
+          ),
           style: TextStyle(color: Theme.of(context).colorScheme.error),
           textAlign: TextAlign.center,
         ),

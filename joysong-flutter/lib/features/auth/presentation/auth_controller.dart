@@ -97,7 +97,10 @@ final class AuthController extends ChangeNotifier {
       tokens = await _repository.readTokens();
     } catch (error) {
       _status = AuthStatus.unauthenticated;
-      _errorMessage = _messageFor(error, fallback: '无法读取本地安全凭证');
+      _errorMessage = _messageFor(
+        error,
+        fallback: _text('无法读取本地安全凭证', 'Unable to read saved sign-in credentials.'),
+      );
       notifyListeners();
       return;
     }
@@ -105,7 +108,10 @@ final class AuthController extends ChangeNotifier {
     try {
       await _loadLoginPreferences();
     } catch (error) {
-      _errorMessage = _messageFor(error, fallback: '无法读取登录偏好');
+      _errorMessage = _messageFor(
+        error,
+        fallback: _text('无法读取登录偏好', 'Unable to read sign-in preferences.'),
+      );
     }
 
     if (tokens != null) {
@@ -144,7 +150,13 @@ final class AuthController extends ChangeNotifier {
     } catch (error) {
       _currentUser = null;
       _status = AuthStatus.unauthenticated;
-      _errorMessage = _messageFor(error, fallback: '自动登录失败，请重新登录');
+      _errorMessage = _messageFor(
+        error,
+        fallback: _text(
+          '自动登录失败，请重新登录',
+          'Automatic sign-in failed. Please sign in again.',
+        ),
+      );
       await _disableAutoLoginFailClosed();
     }
     notifyListeners();
@@ -297,7 +309,10 @@ final class AuthController extends ChangeNotifier {
     try {
       await _repository.sendCode(phone: phone);
     } catch (error) {
-      _errorMessage = _messageFor(error, fallback: '验证码发送失败');
+      _errorMessage = _messageFor(
+        error,
+        fallback: _text('验证码发送失败', 'Failed to send the verification code.'),
+      );
       notifyListeners();
       rethrow;
     }
@@ -417,7 +432,10 @@ final class AuthController extends ChangeNotifier {
           _status != AuthStatus.accountDeletionPending) {
         _currentUser = null;
         _status = AuthStatus.unauthenticated;
-        _errorMessage = '登录已过期，请重新登录';
+        _errorMessage = _text(
+          '登录已过期，请重新登录',
+          'Your session has expired. Please sign in again.',
+        );
         notifyListeners();
       }
       rethrow;
@@ -438,12 +456,21 @@ final class AuthController extends ChangeNotifier {
         await _loadLoginPreferences();
         await _disableAutoLoginFailClosed();
       } catch (_) {
-        _errorMessage = '无法更新登录偏好，已清除自动登录信息';
+        _errorMessage = _text(
+          '无法更新登录偏好，已清除自动登录信息',
+          'Unable to update sign-in preferences. Automatic sign-in was cleared.',
+        );
       }
       try {
         await _repository.logout();
       } catch (error) {
-        _errorMessage = _messageFor(error, fallback: '远端退出失败，本地登录已清除');
+        _errorMessage = _messageFor(
+          error,
+          fallback: _text(
+            '远端退出失败，本地登录已清除',
+            'Remote sign-out failed. You have been signed out on this device.',
+          ),
+        );
       }
     } finally {
       _currentUser = null;
@@ -551,11 +578,18 @@ final class AuthController extends ChangeNotifier {
         try {
           await afterSuccess(session);
         } catch (_) {
-          _errorMessage = '登录成功，但无法保存登录偏好';
+          _errorMessage = _text(
+            '登录成功，但无法保存登录偏好',
+            'Signed in, but sign-in preferences could not be saved.',
+          );
         }
       }
     } catch (error) {
-      _errorMessage = _messageFor(error, fallback: '登录失败，请稍后重试');
+      _errorMessage = _messageFor(
+        error,
+        fallback:
+            _text('登录失败，请稍后重试', 'Sign-in failed. Please try again later.'),
+      );
     } finally {
       _isBusy = false;
       notifyListeners();
@@ -695,13 +729,29 @@ final class AuthController extends ChangeNotifier {
   }
 
   String _messageFor(Object error, {required String fallback}) {
-    if (error is ApiException && error.message.isNotEmpty) {
-      return error.message;
-    }
-    if (error is ArgumentError && error.message != null) {
-      return error.message.toString();
-    }
-    return fallback;
+    final message = switch (error) {
+      ApiException(:final message) when message.isNotEmpty => message,
+      ArgumentError(:final message) when message != null => message.toString(),
+      _ => fallback,
+    };
+    // These auth responses currently contain Chinese text rather than stable
+    // error codes. Resolve known messages using the current app language.
+    return switch (message) {
+      '密码错误，请重试' => _text(message, 'Incorrect password. Please try again.'),
+      '该手机号未注册，请先注册' => _text(message,
+          'This phone number is not registered. Please sign up first.'),
+      '您尚未设置密码，请使用验证码登录或通过「忘记密码」重置' => _text(
+          message,
+          'You have not set a password. Sign in with a verification code or reset it using "Forgot password".',
+        ),
+      '验证码无效或已过期' =>
+        _text(message, 'The verification code is invalid or has expired.'),
+      '账号不可用' => _text(message, 'This account is unavailable.'),
+      '手机号已注册' => _text(message, 'This phone number is already registered.'),
+      _ => RegExp(r'[\u3400-\u9fff]').hasMatch(message)
+          ? _text(message, fallback)
+          : message,
+    };
   }
 
   String _text(String chinese, String english) =>

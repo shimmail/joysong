@@ -8,6 +8,9 @@ import com.joysong.server.common.GlobalExceptionHandler
 import com.joysong.server.config.OrderSplitProperties
 import com.joysong.server.identity.service.InstitutionRelationshipReviewAuthorityOperations
 import com.joysong.server.identity.service.ManagementActor
+import com.joysong.server.identity.service.ManagementAccessService
+import com.joysong.server.project.controller.AdminProfessionalProjectRequestController
+import com.joysong.server.project.controller.ProfessionalProjectRequestController
 import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.institution.service.ProjectChangeContractException
@@ -24,6 +27,12 @@ import org.springframework.jdbc.core.RowMapper
 import org.springframework.cache.CacheManager
 import org.springframework.security.access.AccessDeniedException
 import org.springframework.http.HttpStatus
+import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import java.math.BigDecimal
 import java.sql.ResultSet
 import java.sql.Timestamp
@@ -428,6 +437,51 @@ class ProfessionalProjectRequestServiceTest {
         assertEquals("PENDING", json["status"].asText())
         assertEquals("reviewer-1", json["reviewedBy"].asText())
         assertEquals("result-project", json["resultingProjectId"].asText())
+    }
+
+    @Test
+    fun `list endpoints expose imported blank review notes as explicit null without changing stored snapshots`() {
+        val storedNotes = listOf("", " \t\r\n ", null, "Keep the original review")
+        val rows = listOf("PLATFORM", "INSTITUTION").flatMap { type ->
+            storedNotes.map { note ->
+                listResultSet(type).also { rs ->
+                    every { rs.getString("review_note") } returns note
+                }
+            }
+        }
+        stubListRows(*rows.toTypedArray())
+        val access = mockk<ManagementAccessService>()
+        every { access.actor(any()) } returns adminActor()
+        val responseMapper = Jackson2ObjectMapperBuilder.json()
+            .featuresToDisable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+            .build<com.fasterxml.jackson.databind.ObjectMapper>()
+        val mvc = MockMvcBuilders.standaloneSetup(
+            AdminProfessionalProjectRequestController(service, access),
+            ProfessionalProjectRequestController(service, access, splitRatePolicy, responseMapper)
+        ).setMessageConverters(MappingJackson2HttpMessageConverter(responseMapper)).build()
+
+        listOf("/api/admin/project-requests", "/api/management/project-requests").forEach { path ->
+            val response = mvc.perform(get(path).principal(UsernamePasswordAuthenticationToken("admin-1", "")))
+                .andExpect(status().isOk)
+                .andReturn().response.contentAsString
+            val snapshots = responseMapper.readTree(response)["data"]
+
+            assertEquals(rows.size, snapshots.size())
+            snapshots.forEachIndexed { index, snapshot ->
+                val storedNote = storedNotes[index % storedNotes.size]
+                assertEquals(true, snapshot.has("reviewNote"), path)
+                if (storedNote.isNullOrBlank()) {
+                    assertEquals(true, snapshot["reviewNote"].isNull, "$path snapshot $index")
+                } else {
+                    assertEquals(storedNote, snapshot["reviewNote"].asText())
+                }
+                assertEquals(true, snapshot.has("isActive"), path)
+                assertEquals(index < storedNotes.size, snapshot["isActive"].isNull)
+                assertEquals("2026-08-16T10:00:00", snapshot["submittedAt"].asText())
+                assertEquals(storedNote, rows[index].getString("review_note"))
+            }
+        }
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
     }
 
     @Test

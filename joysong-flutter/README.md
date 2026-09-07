@@ -25,11 +25,11 @@ Flutter 客户端工程，用于逐步替代 `joysong-app`，同时发布 Androi
 
 当前代码是 Sprint 0 工程底座并包含 Sprint 1 的认证基础链路，不代表完整业务迁移。后续范围、验收门禁与发布风险见 [`../docs/FLUTTER_DUAL_PLATFORM_PLAN.md`](../docs/FLUTTER_DUAL_PLATFORM_PLAN.md)。
 
-## 本地运行
+## Android 本地运行
 
 ```shell
 flutter pub get
-flutter run --dart-define=APP_ENV=development
+flutter run --flavor development --dart-define=APP_ENV=development
 ```
 
 开发环境默认地址：Android 模拟器为 `http://10.0.2.2:8080`，iOS 模拟器为 `http://127.0.0.1:8080`。
@@ -38,19 +38,31 @@ Android 真机推荐通过 USB 调试反向映射本机服务。连接设备后�
 
 ```shell
 adb reverse tcp:8080 tcp:8080
-flutter run --dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://127.0.0.1:8080
+flutter run --flavor development --dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://127.0.0.1:8080
 ```
 
 这样无需使用电脑当前的局域网 IP，切换 Wi-Fi 后仍可继续调试。设备重启、重新连接 USB 或撤销映射后，需要重新执行 `adb reverse`。其他环境仍可通过 `API_BASE_URL` 覆盖。
 
 当前海外 USD card 流程固定使用 Stripe Hosted Checkout；Stripe 密钥和 webhook 配置只放在服务端环境变量中，不放入 Flutter 客户端。
 
-生产构建必须同时指定 `APP_ENV=production` 和 HTTPS 的 `API_BASE_URL`。
+Android Studio 选择 `Joysong Android Device`（真机）或 `Joysong Android Emulator`（模拟器）运行配置。自建 Flutter 运行配置时，在 Additional run args 中填写上述 `--flavor development` 和 `--dart-define` 参数；仅指定 `APP_ENV` 不会选择 Android flavor，缺少 flavor 时 `assembleDebug` 会触发其他环境的构建校验。
+
+`--flavor` 选择 Android 构建变体，`APP_ENV` 选择 Dart 业务环境，`API_BASE_URL` 决定请求地址，三者需要配套：
+
+| 用途 | Android flavor | APP_ENV | API_BASE_URL |
+| --- | --- | --- | --- |
+| 真机通过电脑 SSH 隧道联调 | `development` | `development` | `http://127.0.0.1:8080`，需 adb reverse 和 SSH 隧道 |
+| UAT 公网测试 | `uat` | `uat` | 实际 UAT HTTPS 地址 |
+| 生产公网访问 | `prod` | `production` | 实际生产 HTTPS 地址 |
+
+开发包也可以指定公网 HTTPS 地址；App 不会自动检测或建立 SSH 隧道。隧道和无线真机映射步骤见 [SSH 联调指南](../docs/guide/deployment/SSH_TUNNEL.md)。修改构建参数后需要停止并重新运行，不能只热重载。
+
+生产构建必须同时指定 `--flavor prod`、`APP_ENV=production` 和 HTTPS 的 `API_BASE_URL`。UAT/Prod release 还需要对应的 `android/key.uat.properties` / `android/key.prod.properties` 和有效签名文件；development 不允许构建 release。
 
 Android 调试包：
 
 ```shell
-flutter build apk --debug
+flutter build apk --debug --flavor development --dart-define=APP_ENV=development
 ```
 
 ## 质量检查
@@ -62,3 +74,5 @@ flutter test
 ```
 
 Windows 开发机可以完成 Android 构建；iOS 构建、签名和真机验证必须在安装了 Xcode 的 macOS 环境执行。
+
+Mac 迁移、SDK 安装、模拟器构建、真机签名及 IPA 打包的逐步操作见 [Flutter iOS Mac 构建指南](../docs/guide/FLUTTER_IOS_MAC_BUILD.md)。iOS 当前只有 `Runner` scheme，运行时不要套用上面的 Android `--flavor` 参数。

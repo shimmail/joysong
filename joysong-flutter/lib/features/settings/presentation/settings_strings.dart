@@ -82,9 +82,9 @@ final class SettingsStrings {
   String get terms => pick('用户协议', 'Terms of Service');
   String get termsUnavailable =>
       pick('用户协议内容暂不可用', 'The Terms of Service are currently unavailable.');
-  String get about => pick('关于娇颜颂', 'About Joysong');
+  String get about => pick('关于娇颜颂', 'About JoySong');
   String get aboutUnavailable =>
-      pick('关于页面暂不可用', 'About Joysong is currently unavailable.');
+      pick('关于页面暂不可用', 'About JoySong is currently unavailable.');
   String get sizeUnavailable => pick('大小暂不可用', 'Size unavailable');
   String get receiveNotifications => pick('接收消息通知', 'Receive notifications');
   String get receiveNotificationsSubtitle =>

@@ -1177,7 +1177,7 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
             if (widget.error() case final error?)
               Padding(
                 padding: const EdgeInsets.all(8),
-                child: Text(error),
+                child: Text(strings.localizedError(error)),
               ),
             Expanded(
               child: ListView.builder(

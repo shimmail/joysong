@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/features/account_security/domain/account_security_models.dart';
 import 'package:joysong_flutter/features/account_security/presentation/account_deletion_strings.dart';
 import 'package:joysong_flutter/features/auth/presentation/phone_country.dart';
@@ -82,7 +83,9 @@ class _AccountSecurityPageState extends State<AccountSecurityPage> {
     }
     if (controller.status == AccountSecurityLoadStatus.failure) {
       return _MessageState(
-        message: controller.errorMessage ?? '账号安全信息加载失败',
+        message: _securityMessage(
+          context, controller.errorMessage ?? '账号安全信息加载失败',
+        ),
         onRetry: () => controller.load(force: true),
       );
     }
@@ -95,13 +98,13 @@ class _AccountSecurityPageState extends State<AccountSecurityPage> {
       children: [
         if (controller.errorMessage != null)
           _FeedbackBanner(
-            message: controller.errorMessage!,
+            message: _securityMessage(context, controller.errorMessage!),
             isError: true,
             onClose: controller.clearFeedback,
           ),
         if (controller.successMessage != null)
           _FeedbackBanner(
-            message: controller.successMessage!,
+            message: _securityMessage(context, controller.successMessage!),
             onClose: controller.clearFeedback,
           ),
         Card(
@@ -380,7 +383,7 @@ class _PhoneChangeDialogState extends State<_PhoneChangeDialog> {
             children: [
               if (error != null) ...[
                 Text(
-                  error,
+                  _securityMessage(context, error),
                   key: const Key('phone-change-error'),
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
@@ -450,7 +453,9 @@ class _PhoneChangeDialogState extends State<_PhoneChangeDialog> {
                   labelText: '当前手机号验证码',
                   errorText: _currentCode.text.isNotEmpty &&
                           !RegExp(r'^\d{6}$').hasMatch(_currentCode.text)
-                      ? '请输入 6 位验证码'
+                      ? context.localized(
+                          '请输入 6 位验证码', 'Enter a 6-digit verification code',
+                        )
                       : null,
                 ),
                 onChanged: (_) => setState(() {}),
@@ -527,7 +532,9 @@ class _PhoneChangeDialogState extends State<_PhoneChangeDialog> {
                   labelText: '新手机号验证码',
                   errorText: _newCode.text.isNotEmpty &&
                           !RegExp(r'^\d{6}$').hasMatch(_newCode.text)
-                      ? '请输入 6 位验证码'
+                      ? context.localized(
+                          '请输入 6 位验证码', 'Enter a 6-digit verification code',
+                        )
                       : null,
                 ),
                 onChanged: (_) => setState(() {}),
@@ -609,7 +616,11 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
               autofillHints: const [AutofillHints.password],
               decoration: const InputDecoration(labelText: '原密码'),
               validator: (value) =>
-                  value == null || value.isEmpty ? '请输入原密码' : null,
+                  value == null || value.isEmpty
+                      ? context.localized(
+                          '请输入原密码', 'Enter your current password',
+                        )
+                      : null,
             ),
             TextFormField(
               key: const Key('new-password-field'),
@@ -617,7 +628,7 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
               obscureText: true,
               autofillHints: const [AutofillHints.newPassword],
               decoration: const InputDecoration(labelText: '新密码（8-128 位）'),
-              validator: _passwordValidator,
+              validator: (value) => _passwordValidator(context, value),
             ),
             TextFormField(
               controller: _confirmation,
@@ -625,7 +636,9 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
               autofillHints: const [AutofillHints.newPassword],
               decoration: const InputDecoration(labelText: '确认新密码'),
               validator: (value) =>
-                  value != _newPassword.text ? '两次输入的密码不一致' : null,
+                  value != _newPassword.text
+                      ? context.localized('两次输入的密码不一致', 'Passwords do not match')
+                      : null,
             ),
           ],
         ),
@@ -725,7 +738,9 @@ class _SmsPasswordDialogState extends State<_SmsPasswordDialog> {
                     validator: (value) =>
                         RegExp(r'^\d{6}$').hasMatch(value ?? '')
                             ? null
-                            : '请输入 6 位验证码',
+                            : context.localized(
+                                '请输入 6 位验证码', 'Enter a 6-digit verification code',
+                              ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -742,7 +757,7 @@ class _SmsPasswordDialogState extends State<_SmsPasswordDialog> {
               obscureText: true,
               autofillHints: const [AutofillHints.newPassword],
               decoration: const InputDecoration(labelText: '新密码（8-128 位）'),
-              validator: _passwordValidator,
+              validator: (value) => _passwordValidator(context, value),
             ),
             TextFormField(
               controller: _confirmation,
@@ -750,7 +765,9 @@ class _SmsPasswordDialogState extends State<_SmsPasswordDialog> {
               autofillHints: const [AutofillHints.newPassword],
               decoration: const InputDecoration(labelText: '确认新密码'),
               validator: (value) =>
-                  value != _password.text ? '两次输入的密码不一致' : null,
+                  value != _password.text
+                      ? context.localized('两次输入的密码不一致', 'Passwords do not match')
+                      : null,
             ),
           ],
         ),
@@ -1118,10 +1135,48 @@ class _MessageState extends StatelessWidget {
   }
 }
 
-String? _passwordValidator(String? value) {
+String? _passwordValidator(BuildContext context, String? value) {
   final password = value ?? '';
   if (password.length < 8 || password.length > 128) {
-    return '密码长度应为 8-128 位';
+    return context.localized(
+      '密码长度应为 8-128 位', 'Password must be 8–128 characters',
+    );
   }
   return null;
+}
+
+String _securityMessage(BuildContext context, String message) {
+  if (!context.isEnglish) return message;
+  if (message.startsWith('验证码已发送至 ')) {
+    return 'Verification code sent to ${message.substring('验证码已发送至 '.length)}';
+  }
+  return switch (message) {
+    '账号安全信息加载失败' => 'Failed to load account security information.',
+    '当前账号未绑定手机号' => 'No phone number is linked to this account.',
+    '当前账号未绑定手机号，暂时无法设置密码' => 'Link a phone number before setting a password.',
+    '手机号格式不正确' || '手机号必须包含国际区号' => 'Enter a valid phone number including the country code.',
+    '账号安全信息尚未加载' => 'Account security information has not loaded yet.',
+    '请先验证当前手机号' || '请先完成当前手机号验证' => 'Verify your current phone number first.',
+    '请先向该手机号发送验证码' => 'Send a verification code to this phone number first.',
+    '验证码无效或已过期' => 'The verification code is invalid or has expired.',
+    '请输入 6 位数字验证码' => 'Enter a 6-digit verification code.',
+    '原密码错误' || '密码错误，请重试' => 'Incorrect password. Please try again.',
+    '新密码不能与原密码相同' => 'Your new password must differ from your current password.',
+    '您尚未设置密码，请使用「忘记密码」功能设置' => 'Use Forgot password to set a password first.',
+    '您已设置密码，请使用修改密码功能' => 'A password is already set. Use Change password.',
+    '输入的手机号与账号关联手机号不一致' => 'This phone number does not match the number linked to your account.',
+    '新密码长度应为 8-128 位' => 'New password must be 8–128 characters.',
+    '手机号已注册' || '该手机号已被注册' => 'This phone number is already in use.',
+    '新手机号不能与当前手机号相同' => 'Enter a different phone number from your current one.',
+    '当前账号已绑定手机号，请使用换绑手机号功能' => 'A phone number is already linked. Use Change phone number.',
+    '密码已修改，请重新登录' => 'Password changed. Please sign in again.',
+    '密码已重置，请重新登录' => 'Password reset. Please sign in again.',
+    '密码已设置，请重新登录' => 'Password set. Please sign in again.',
+    '当前手机号验证成功，请输入新手机号' => 'Current phone verified. Enter your new phone number.',
+    '手机号已更换，请重新登录' => 'Phone number changed. Please sign in again.',
+    '手机号已绑定，请重新登录' => 'Phone number linked. Please sign in again.',
+    _ => RegExp(r'[\u3400-\u9fff]').hasMatch(message)
+        ? 'Unable to complete this action. Please try again.'
+        : message,
+  };
 }

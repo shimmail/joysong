@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
+import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/core/translation/auto_translation_builder.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
@@ -324,7 +325,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     final order = controller.order;
     if (order == null) {
       return _DetailMessageState(
-        message: controller.errorMessage ?? '订单不存在',
+        message: _orderErrorMessage(
+          context,
+          controller.errorMessage ?? '订单不存在',
+        ),
         onRetry: controller.load,
       );
     }
@@ -332,7 +336,9 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
       children: [
         if (controller.errorMessage != null)
-          _ErrorBanner(message: controller.errorMessage!),
+          _ErrorBanner(
+            message: _orderErrorMessage(context, controller.errorMessage!),
+          ),
         _StatusHeader(order: order),
         const SizedBox(height: 12),
         if (order.isTravelGroundServiceOnly)
@@ -382,7 +388,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
             controller.settlementErrorMessage != null) ...[
           const SizedBox(height: 12),
           _SettlementErrorCard(
-            message: controller.settlementErrorMessage!,
+            message: _orderErrorMessage(
+              context,
+              controller.settlementErrorMessage!,
+            ),
             onRetry: controller.retrySettlement,
           ),
         ],
@@ -1351,7 +1360,10 @@ class _DetailMessageState extends StatelessWidget {
           children: [
             Text(message),
             const SizedBox(height: 8),
-            TextButton(onPressed: onRetry, child: const Text('重试')),
+            TextButton(
+              onPressed: onRetry,
+              child: Text(_isEnglish(context) ? 'Retry' : '重试'),
+            ),
           ],
         ),
       );
@@ -1412,6 +1424,41 @@ String _minorUsd(int minor) {
 
 bool _isEnglish(BuildContext context) =>
     Localizations.localeOf(context).languageCode == 'en';
+
+String _orderErrorMessage(
+  BuildContext context,
+  String message, {
+  String englishFallback = 'The order operation failed. Please try again.',
+}) {
+  if (!_isEnglish(context)) return message;
+  const translations = {
+    '订单不存在': 'Order not found.',
+    '订单详情加载失败': 'Unable to load order details. Please try again.',
+    '订单刷新失败': 'Unable to refresh the order. Please try again.',
+    '订单操作失败': 'The order operation failed. Please try again.',
+    '结算详情加载失败': 'Unable to load settlement details. Please try again.',
+    '请选择或填写退款原因': 'Select or enter a refund reason.',
+    '订单详情尚未加载，无法申请退款':
+        'Wait for the order details to load before requesting a refund.',
+    '退款申请失败': 'Refund request failed. Please try again.',
+    '退款申请结果待确认，请刷新订单详情后再试':
+        'The refund request status is unconfirmed. Refresh the order details before trying again.',
+    '无权操作该订单': 'You do not have permission to modify this order.',
+    '无权操作此订单': 'You do not have permission to modify this order.',
+    '当前状态不允许取消': 'This order cannot be cancelled in its current status.',
+    '所选退款凭证不符合要求。': 'This evidence file is not supported.',
+  };
+  final translated = translations[message];
+  if (translated != null) return translated;
+  if (message.startsWith('退款申请已提交，但订单状态刷新失败')) {
+    // Preserve the successful submission status even when the appended server
+    // detail is unknown; do not suggest submitting a duplicate refund request.
+    return 'Your refund request was submitted, but the order could not be refreshed. Please refresh the order details later.';
+  }
+  return RegExp(r'[\u3400-\u9fff]').hasMatch(message)
+      ? englishFallback
+      : message;
+}
 
 class _FlowOrderSummary extends StatelessWidget {
   const _FlowOrderSummary({
@@ -1638,7 +1685,10 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
   }
 
   String _submissionMessage(Object error) {
-    final message = error.toString().trim();
+    final message = switch (error) {
+      ApiException(:final message) => message.trim(),
+      _ => error.toString().trim(),
+    };
     return message.isEmpty ? _failureMessage() : message;
   }
 
@@ -1813,7 +1863,11 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
           if (_submitError != null) ...[
             const SizedBox(height: 12),
             Text(
-              _submitError!,
+              _orderErrorMessage(
+                context,
+                _submitError!,
+                englishFallback: 'Refund request failed. Please try again.',
+              ),
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ],

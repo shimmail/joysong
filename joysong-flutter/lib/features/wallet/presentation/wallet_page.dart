@@ -95,6 +95,7 @@ class _WalletPageState extends State<WalletPage> {
             DropdownButtonFormField<int>(
               key: const Key('wallet-owner-selector'),
               initialValue: wallet.walletId,
+              isExpanded: true,
               decoration: InputDecoration(
                 labelText: context.localized('收益归属', 'Earnings owner'),
                 border: const OutlineInputBorder(),
@@ -102,7 +103,11 @@ class _WalletPageState extends State<WalletPage> {
               items: controller.overview.wallets
                   .map((account) => DropdownMenuItem(
                         value: account.walletId,
-                        child: Text(_selectorLabel(context, account)),
+                        child: Text(
+                          _selectorLabel(context, account),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ))
                   .toList(growable: false),
               onChanged: (walletId) {

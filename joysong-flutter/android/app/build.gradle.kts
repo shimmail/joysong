@@ -202,25 +202,26 @@ val rejectDevelopmentPublishing = tasks.register("rejectDevelopmentPublishing") 
     }
 }
 
+// AGP can share CMake prerequisites (including preProdDebugBuild) across flavors.
+// Guard variant compilation and artifact tasks, not shared pre-build/clean tasks.
+val guardedVariantTask = Regex(
+    "(?:compileFlutterBuild|assemble|bundle|package)(Development|Uat|Prod)(Debug|Profile|Release)",
+)
 tasks.configureEach {
-    val isUatVariant = Regex("Uat(Debug|Profile|Release)", RegexOption.IGNORE_CASE)
-        .containsMatchIn(name)
-    val isProdVariant = Regex("Prod(Debug|Profile|Release)", RegexOption.IGNORE_CASE)
-        .containsMatchIn(name)
-    if (isUatVariant) {
-        dependsOn(validateUatEnvironment)
-    }
-    if (isProdVariant) {
-        dependsOn(validateProdEnvironment)
-    }
-    if (name.contains("UatRelease", ignoreCase = true)) {
-        dependsOn(validateUatSigning)
-    }
-    if (name.contains("ProdRelease", ignoreCase = true)) {
-        dependsOn(validateProdSigning)
-    }
-    if (name.contains("DevelopmentRelease", ignoreCase = true)) {
-        dependsOn(rejectDevelopmentPublishing)
+    val variant = guardedVariantTask.matchEntire(name) ?: return@configureEach
+    val (flavor, buildType) = variant.destructured
+    when (flavor) {
+        "Uat" -> {
+            dependsOn(validateUatEnvironment)
+            if (buildType == "Release") dependsOn(validateUatSigning)
+        }
+        "Prod" -> {
+            dependsOn(validateProdEnvironment)
+            if (buildType == "Release") dependsOn(validateProdSigning)
+        }
+        "Development" -> {
+            if (buildType == "Release") dependsOn(rejectDevelopmentPublishing)
+        }
     }
 }
 

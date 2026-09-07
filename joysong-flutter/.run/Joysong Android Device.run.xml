@@ -1,17 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Joysong Android Device" type="FlutterRunConfigurationType" factoryName="Flutter">
-    <envs>
-      <env name="ANDROID_SDK_ROOT" value="D:\dev\Android\sdk" />
-      <env name="ANDROID_USER_HOME" value="D:\code\kotlin\joysong\.flutter-cache\android-home" />
-      <env name="APPDATA" value="D:\code\kotlin\joysong\.flutter-cache\appdata" />
-      <env name="FLUTTER_STORAGE_BASE_URL" value="https://storage.flutter-io.cn" />
-      <env name="GRADLE_USER_HOME" value="D:\code\kotlin\joysong\.flutter-cache\gradle" />
-      <env name="PUB_CACHE" value="D:\code\kotlin\joysong\.flutter-cache\pub" />
-      <env name="PUB_HOSTED_URL" value="https://pub.flutter-io.cn" />
-      <env name="TEMP" value="D:\code\kotlin\joysong\.flutter-cache\temp" />
-      <env name="TMP" value="D:\code\kotlin\joysong\.flutter-cache\temp" />
-    </envs>
-    <option name="additionalArgs" value="--dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://127.0.0.1:8080" />
+    <option name="additionalArgs" value="--flavor development --dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://127.0.0.1:8080" />
     <option name="filePath" value="$PROJECT_DIR$/lib/main.dart" />
     <method v="2" />
   </configuration>

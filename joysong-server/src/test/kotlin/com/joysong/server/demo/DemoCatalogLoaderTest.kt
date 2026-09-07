@@ -40,7 +40,7 @@ class DemoCatalogLoaderTest {
         val loaded = loader.load(catalogPath())
 
         assertEquals(1, loaded.catalog.schemaVersion)
-        assertEquals("2026.09.02.1", loaded.catalog.datasetVersion)
+        assertEquals("2026.09.06.1", loaded.catalog.datasetVersion)
         assertEquals("demo-cn-v1", loaded.catalog.namespace)
         assertEquals(20, loaded.catalog.accounts.size)
         assertTrue(loaded.catalog.accounts.all { it.phone.matches(Regex("^\\+86\\d{11}$")) })
@@ -110,6 +110,6 @@ class DemoCatalogLoaderTest {
     }
 
     private companion object {
-        const val EXPECTED_SHA256 = "4ab42f441f944ac594625c6775511909c47bb09e3a9240f9128adb6d9e030075"
+        const val EXPECTED_SHA256 = "23b741663b5b7aee991972f138db25b83ecaf02e477b14904eb835425508f571"
     }
 }

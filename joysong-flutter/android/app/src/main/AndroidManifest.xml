@@ -4,7 +4,9 @@
 
     <application
         android:allowBackup="false"
-        android:label="娇颜颂"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:name="${applicationName}"
         android:supportsRtl="true"
         android:theme="@style/NormalTheme"

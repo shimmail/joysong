@@ -283,7 +283,8 @@ class ProfessionalProjectRequestService(
                     } else null,
                     notes = rs.getString("notes"),
                     status = rs.getString("status"),
-                    reviewNote = rs.getString("review_note"),
+                    // Imported pending requests may store an empty note; the response contract uses null.
+                    reviewNote = rs.getString("review_note")?.takeIf(String::isNotBlank),
                     reviewedBy = rs.getString("reviewed_by"),
                     reviewedAt = rs.getTimestamp("reviewed_at")?.toLocalDateTime(),
                     resultingProjectId = rs.getString("resulting_project_id"),

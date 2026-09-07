@@ -70,9 +70,15 @@ final class MessagingStrings {
       pick('操作失败，请稍后重试', 'Something went wrong. Try again later.');
 
   String localizedError(String message) {
-    if (isEnglish && message == '操作失败，请稍后重试') {
-      return actionFailed;
-    }
-    return message;
+    if (!isEnglish) return message;
+    return switch (message) {
+      '操作失败，请稍后重试' => actionFailed,
+      '加载失败，请手动重试' => 'Unable to load messages. Please try again.',
+      '请等待对方回复后再发送消息' =>
+        'Please wait for a reply before sending another message.',
+      _ => RegExp(r'[\u3400-\u9fff]').hasMatch(message)
+          ? actionFailed
+          : message,
+    };
   }
 }

@@ -7,6 +7,7 @@ import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_controller.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_catalog_cards.dart';
+import 'package:joysong_flutter/features/agent/presentation/agent_error_message.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_controller.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_view.dart';
 
@@ -631,7 +632,13 @@ class _StatusBanner extends StatelessWidget {
                 size: 18,
               ),
               const SizedBox(width: 8),
-              Expanded(child: Text(message)),
+              Expanded(
+                child: Text(agentErrorMessage(
+                  message,
+                  isEnglish:
+                      Localizations.localeOf(context).languageCode == 'en',
+                )),
+              ),
             ],
           ),
         ),

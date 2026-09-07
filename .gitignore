@@ -18,6 +18,10 @@ local.properties
 # Kotlin
 .kotlin/
 
+# Python bytecode caches
+__pycache__/
+*.py[cod]
+
 # Node
 node_modules/
 dist/

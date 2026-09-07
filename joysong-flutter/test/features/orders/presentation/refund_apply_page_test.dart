@@ -13,6 +13,63 @@ import 'package:joysong_flutter/features/orders/presentation/order_detail_page.d
 import 'package:joysong_flutter/features/orders/presentation/orders_controller.dart';
 
 void main() {
+  for (final entry in {
+    '退款申请结果待确认，请刷新订单详情后再试':
+        'The refund request status is unconfirmed. Refresh the order details before trying again.',
+    '退款申请已提交，但订单状态刷新失败：服务器内部错误':
+        'Your refund request was submitted, but the order could not be refreshed. Please refresh the order details later.',
+    '后端返回的未识别错误': 'Refund request failed. Please try again.',
+  }.entries) {
+    testWidgets('refund error uses the current locale: ${entry.key}',
+        (tester) async {
+      final locale = ValueNotifier(const Locale('zh'));
+      addTearDown(locale.dispose);
+      await tester.pumpWidget(ValueListenableBuilder<Locale>(
+        valueListenable: locale,
+        builder: (context, value, _) => MaterialApp(
+          locale: value,
+          supportedLocales: const [Locale('zh'), Locale('en')],
+          localizationsDelegates: _testLocalizationsDelegates,
+          home: RefundApplyPage(
+            order: _order(flow: OrderPaymentFlow.travelGroundServiceOnly),
+            onSubmit: (_) async => false,
+            submissionErrorMessage: () => entry.key,
+          ),
+        ),
+      ));
+      await _tapVisible(tester, find.byKey(const Key('refund-reason-0')));
+      await _tapVisible(tester, find.byKey(const Key('refund-submit')));
+      await tester.pumpAndSettle();
+      await _ensureVisible(tester, find.text(entry.key));
+      expect(find.text(entry.key), findsOneWidget);
+
+      locale.value = const Locale('en');
+      await tester.pumpAndSettle();
+      await _ensureVisible(tester, find.text(entry.value));
+      expect(find.text(entry.value), findsOneWidget);
+      expect(find.text(entry.key), findsNothing);
+      expect(find.byType(RefundApplyPage), findsOneWidget);
+    });
+  }
+
+  testWidgets('English refund page localizes a thrown API error',
+      (tester) async {
+    await _pumpRefundPage(
+      tester,
+      locale: const Locale('en'),
+      onSubmit: (_) async => throw const ApiException(
+        message: '请选择或填写退款原因',
+        httpStatus: 400,
+      ),
+    );
+    await _tapVisible(tester, find.byKey(const Key('refund-reason-0')));
+    await _tapVisible(tester, find.byKey(const Key('refund-submit')));
+    await tester.pumpAndSettle();
+    await _ensureVisible(tester, find.text('Select or enter a refund reason.'));
+    expect(find.text('Select or enter a refund reason.'), findsOneWidget);
+    expect(find.textContaining('ApiException'), findsNothing);
+  });
+
   testWidgets('service fee page shows optional evidence and preserves jpg pdf order',
       (tester) async {
     final picks = [
@@ -415,6 +472,7 @@ void main() {
 
 Future<void> _pumpRefundPage(
   WidgetTester tester, {
+  Locale locale = const Locale('zh'),
   Order? order,
   bool canUploadLegacyEvidence = false,
   Future<String?> Function()? onPickLegacyEvidence,
@@ -423,8 +481,8 @@ Future<void> _pumpRefundPage(
   String? Function()? submissionErrorMessage,
 }) => tester.pumpWidget(
       MaterialApp(
-        locale: const Locale('zh'),
-        supportedLocales: const [Locale('zh')],
+        locale: locale,
+        supportedLocales: const [Locale('zh'), Locale('en')],
         localizationsDelegates: _testLocalizationsDelegates,
         home: RefundApplyPage(
           order: order ?? _order(flow: OrderPaymentFlow.travelGroundServiceOnly),
