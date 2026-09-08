@@ -1,5 +1,9 @@
 platform :ios, '13.0'
 
+# Required by Swift pods (AppCheckCore) when Flutter plugins are linked as
+# static libraries.
+use_modular_headers!
+
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
 project 'Runner', {
