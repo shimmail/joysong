@@ -20,6 +20,7 @@ jobs:
     outputs:
       backend: ${{ steps.scope.outputs.backend }}
       admin: ${{ steps.scope.outputs.admin }}
+      flutter: ${{ steps.scope.outputs.flutter }}
       infrastructure: ${{ steps.scope.outputs.infrastructure }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -48,6 +49,7 @@ jobs:
           {
             echo "backend=$(match '^joysong-server/(src/|build\.gradle\.kts$|settings\.gradle\.kts$|gradle/|gradlew(\.bat)?$|gradle\.properties$)')"
             echo "admin=$(match '^joysong-admin/')"
+            echo "flutter=$(match '^joysong-flutter/|^\.github/workflows/quality-gates\.yml$')"
             echo "infrastructure=$(match '^(\.github/|joysong-server/deploy/|docs/guide/deployment/|design/ALIYUN_CICD_DEPLOYMENT\.puml$)')"
           } >>"$GITHUB_OUTPUT"
 
@@ -136,6 +138,34 @@ jobs:
           npm test -- --maxWorkers=1 --fileParallelism=false
           npm run build
 
+  flutter:
+    needs: changes
+    if: needs.changes.outputs.flutter == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: joysong-flutter/android/gradle/wrapper/gradle-wrapper.properties
+      - uses: subosito/flutter-action@e938fdf56512cc96ef2f93601a5a40bde3801046 # v2.19.0
+        with:
+          flutter-version: '3.44.8'
+          cache: true
+      - name: Analyze, test and build Flutter Android debug
+        working-directory: joysong-flutter
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          flutter pub get
+          flutter analyze
+          flutter test
+          flutter build apk --debug --flavor development --dart-define=APP_ENV=development
+          test -f build/app/outputs/flutter-apk/app-development-debug.apk
+
   infrastructure:
     needs: changes
     if: needs.changes.outputs.infrastructure == 'true'
@@ -218,7 +248,7 @@ jobs:
   quality-gates:
     name: Required quality gates
     if: always()
-    needs: [changes, backend, backend-mysql, admin, infrastructure, security]
+    needs: [changes, backend, backend-mysql, admin, flutter, infrastructure, security]
     runs-on: ubuntu-latest
     steps:
       - name: Require every selected check to pass
@@ -241,6 +271,10 @@ jobs:
             (
               (.changes.outputs.admin == "true" and .admin.result == "success") or
               (.changes.outputs.admin != "true" and .admin.result == "skipped")
+            ) and
+            (
+              (.changes.outputs.flutter == "true" and .flutter.result == "success") or
+              (.changes.outputs.flutter != "true" and .flutter.result == "skipped")
             ) and
             (
               (.changes.outputs.infrastructure == "true" and .infrastructure.result == "success") or

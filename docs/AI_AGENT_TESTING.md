@@ -72,11 +72,19 @@ $env:DB_PASSWORD='<从密钥管理器注入>'
 
 ## Flutter 定向验证
 
-从当前 worktree 的 `joysong-flutter` 目录运行仓库配置的 Flutter SDK：
+从当前 worktree 的 `joysong-flutter` 目录运行仓库配置的 Flutter SDK。以下环境变量只作用于当前 PowerShell 进程，并把 Flutter、Pub、Gradle、Android 用户目录和临时文件统一保留在仓库根目录的 `.flutter-cache`，避免在 C 盘重复下载：
 
 ```powershell
+$flutterCache = Join-Path $repoRoot '.flutter-cache'
+$env:PUB_CACHE = Join-Path $flutterCache 'pub-cache'
+$env:GRADLE_USER_HOME = Join-Path $flutterCache 'gradle'
+$env:ANDROID_USER_HOME = Join-Path $flutterCache 'android-home'
+$env:APPDATA = Join-Path $flutterCache 'appdata'
+$env:LOCALAPPDATA = Join-Path $flutterCache 'localappdata'
+$env:TEMP = Join-Path $flutterCache 'temp'
+$env:TMP = $env:TEMP
 Set-Location (Join-Path $repoRoot 'joysong-flutter')
-$flutter = 'D:\code\kotlin\joysong\.flutter-cache\sdk\flutter\bin\flutter.bat'
+$flutter = Join-Path $flutterCache 'sdk\flutter\bin\flutter.bat'
 & $flutter test `
   test/features/agent/agent_catalog_cards_test.dart `
   test/features/agent/agent_chat_page_test.dart `
