@@ -208,11 +208,26 @@ npm run build
 ### Flutter
 
 ```powershell
-Set-Location joysong-flutter
-dart format --output=none --set-exit-if-changed lib test
-flutter analyze
-flutter test
+$repoRoot = (Resolve-Path .).Path
+$flutterCache = Join-Path $repoRoot '.flutter-cache'
+$env:PUB_CACHE = Join-Path $flutterCache 'pub-cache'
+$env:GRADLE_USER_HOME = Join-Path $flutterCache 'gradle'
+$env:ANDROID_USER_HOME = Join-Path $flutterCache 'android-home'
+$env:APPDATA = Join-Path $flutterCache 'appdata'
+$env:LOCALAPPDATA = Join-Path $flutterCache 'localappdata'
+$env:TEMP = Join-Path $flutterCache 'temp'
+$env:TMP = $env:TEMP
+$flutter = Join-Path $flutterCache 'sdk\flutter\bin\flutter.bat'
+$dart = Join-Path $flutterCache 'sdk\flutter\bin\dart.bat'
+
+Set-Location (Join-Path $repoRoot 'joysong-flutter')
+& $dart format --output=none --set-exit-if-changed lib test
+& $flutter analyze
+& $flutter test
+& $flutter build apk --debug --flavor development --dart-define=APP_ENV=development
 ```
+
+以上设置只影响当前 PowerShell 进程，复用仓库根目录已有的 Flutter 3.44.8、Pub 和 Gradle 缓存，避免在 C 盘重复下载。PR 和 `master` push 的质量门禁会对 Flutter 相关改动自动执行相同的 analyze、test 和 Android debug build；GitHub 托管 Runner 使用远程缓存。
 
 Windows 可完成 Android 构建；iOS 构建、签名、真机和 TestFlight 验收必须在 macOS/Xcode 环境完成。完整移动端发布检查见 [Flutter 发布检查清单](docs/FLUTTER_RELEASE_CHECKLIST.md)。
 
@@ -266,7 +281,7 @@ git status --short --untracked-files=all
 
 ## 已知限制与排障顺序
 
-- 当前 PR 质量门禁覆盖 Backend、Admin、Infrastructure 和安全扫描；Flutter 尚未加入该工作流，移动端改动必须由开发者运行本 README 中的 Flutter 检查。
+- 当前 PR 质量门禁覆盖 Backend、Admin、Flutter、Infrastructure 和安全扫描；Flutter 相关改动会自动执行 analyze、test 和 Android development debug build。
 - 后端启动失败：先检查 `SPRING_PROFILES_ACTIVE`、`DB_USERNAME`/`DB_PASSWORD`、`JWT_SECRET`、`ADMIN_PHONE`、Google/AI 必要配置、数据库 host/name 和 Flyway 状态。
 - Android 无法访问本机 Backend：确认服务监听、`adb reverse` 和 `API_BASE_URL`；模拟器使用 `10.0.2.2`。
 - Admin 请求失败：确认 Backend 在 8080，且 Vite 代理没有被自定义配置覆盖。

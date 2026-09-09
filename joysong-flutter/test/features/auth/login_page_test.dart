@@ -10,8 +10,8 @@ import 'package:joysong_flutter/features/auth/presentation/login_strings.dart';
 
 void main() {
   test('brand title follows the selected language', () {
-    expect(const LoginStrings(isEnglish: true).brandTitle, 'JOYINGSONG');
-    expect(const LoginStrings(isEnglish: false).brandTitle, '娇颜颂');
+    expect(const LoginStrings.english().brandTitle, 'JOYINGSONG');
+    expect(const LoginStrings.chinese().brandTitle, '娇颜颂');
   });
 
   test('registration and code sending errors follow the selected language', () async {

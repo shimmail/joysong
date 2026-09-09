@@ -415,6 +415,13 @@ def validate_quality_gates(path: Path, text: str, errors: list[str]) -> None:
             "joysong-server/deploy/ci/run-actionlint.sh",
             "aquasecurity/trivy-action@",
             "format: cyclonedx",
+            "subosito/flutter-action@e938fdf56512cc96ef2f93601a5a40bde3801046",
+            "flutter-version: '3.44.8'",
+            "flutter pub get",
+            "flutter analyze",
+            "flutter test",
+            "flutter build apk --debug --flavor development --dart-define=APP_ENV=development",
+            "test -f build/app/outputs/flutter-apk/app-development-debug.apk",
         ),
         errors,
     )
@@ -426,17 +433,13 @@ def validate_quality_gates(path: Path, text: str, errors: list[str]) -> None:
         errors.append(
             f"{path.relative_to(ROOT)}: active quality gates must target master explicitly"
         )
-    if re.search(r"\b(?:flutter|android|ios|apk)\b", text, re.IGNORECASE):
-        errors.append(
-            f"{path.relative_to(ROOT)}: current quality gates must not build mobile clients"
-        )
-
     jobs = extract_jobs(path, text, errors)
     expected_jobs = {
         "changes",
         "backend",
         "backend-mysql",
         "admin",
+        "flutter",
         "infrastructure",
         "security",
         "quality-gates",
@@ -448,6 +451,42 @@ def validate_quality_gates(path: Path, text: str, errors: list[str]) -> None:
         )
     for job_name in expected_jobs:
         require_runner(path, jobs, job_name, "ubuntu-latest", errors)
+
+    require_snippets(
+        path,
+        jobs.get("changes", ""),
+        (
+            "flutter: ${{ steps.scope.outputs.flutter }}",
+            "^joysong-flutter/|^\\.github/workflows/quality-gates\\.yml$",
+        ),
+        errors,
+    )
+    require_snippets(
+        path,
+        jobs.get("flutter", ""),
+        (
+            "needs: changes",
+            "if: needs.changes.outputs.flutter == 'true'",
+            "working-directory: joysong-flutter",
+            "flutter-version: '3.44.8'",
+            "flutter pub get",
+            "flutter analyze",
+            "flutter test",
+            "flutter build apk --debug --flavor development --dart-define=APP_ENV=development",
+            "test -f build/app/outputs/flutter-apk/app-development-debug.apk",
+        ),
+        errors,
+    )
+    require_snippets(
+        path,
+        jobs.get("quality-gates", ""),
+        (
+            "needs: [changes, backend, backend-mysql, admin, flutter, infrastructure, security]",
+            '(.changes.outputs.flutter == "true" and .flutter.result == "success")',
+            '(.changes.outputs.flutter != "true" and .flutter.result == "skipped")',
+        ),
+        errors,
+    )
 
 
 def validate_uat_candidate(path: Path, text: str, errors: list[str]) -> None:
@@ -628,6 +667,7 @@ def main() -> None:
         ROOT / "joysong-server/deploy/tests/test_package_release.py",
         ROOT / "joysong-server/deploy/tests/test_joysong_uat_deploy.py",
         ROOT / "joysong-server/deploy/tests/test_release_cross_contract.py",
+        ROOT / "joysong-server/deploy/tests/test_validate_workflows.py",
     )
     for path in required_assets:
         read_required(path, errors)
