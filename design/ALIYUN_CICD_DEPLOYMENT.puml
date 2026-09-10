@@ -9,7 +9,7 @@ actor "UAT Reviewer" as Reviewer
 
 rectangle GitHub {
   component "PR / master\nRequired quality gates\nGitHub-hosted Runner" as Quality
-  component "UAT tag build\nBackend + Admin\nGitHub-hosted Runner" as Build
+  component "UAT tag build\nBackend + Admin / and /admin/\nGitHub-hosted Runner" as Build
   artifact "Actions Artifact\njoysong-uat-<tag>.tar.gz\nmanifest / SHA / SBOM / scan" as Artifact
   component "Publish result\nGitHub-hosted job\nGH_REPO = github.repository" as Publish
   artifact "Private Draft Release" as Draft
@@ -26,6 +26,8 @@ cloud "Alibaba Cloud" {
     folder "Admin releases\n/var/www/joysong-demo\ncurrent / previous" as AdminReleases
     component "joysong-demo.service\ndemo / 127.0.0.1:8080" as Service
     component "Nginx\nwww-data\n/etc/nginx/conf.d/joysong-public.conf" as Nginx
+    component "Public IP TLS transaction\nshared deploy.lock\ncurrent + previous compatible" as TLS
+    file "public-ip-tls.enabled\nroot:root 0600\nHTTPS gates required" as TLSState
     file "/etc/joysong-demo/host-contract\ntwo template SHA-256 values" as HostContract
     database "Local MySQL 8\nmyapp_worktree_uat\nfresh: empty\nhealthy: B33 + V34...V40" as Database
     folder "uploads / private / staging\nRunner isolated" as PersistentData
@@ -37,6 +39,9 @@ cloud "Alibaba Cloud" {
 Developer --> Quality : pull request / master push
 Quality --> Build : unused UAT tag\npoints to passed master commit
 Build --> Artifact : immutable package
+TLS --> Nginx : validated site /admin/ -> current/admin/\nrestore on failure
+TLS --> TLSState : commit after renewal + health
+TLSState --> RootDeploy : HTTP + HTTPS checks; no downgrade
 Artifact --> Runner : download current run only
 Runner --> DeployData : write incoming/<run-id>
 Runner --> RootDeploy : sudo fixed argv only

@@ -181,7 +181,12 @@ jobs:
         working-directory: joysong-admin
         run: |
           npm ci
-          npm run build
+          VITE_BASE_PATH=/ npm run build
+          VITE_BASE_PATH=/admin/ npm run build -- --outDir dist/admin
+          grep -Fq 'src="/assets/' dist/index.html
+          grep -Fq 'href="/admin/favicon.svg"' dist/admin/index.html
+          grep -Fq 'src="/admin/assets/' dist/admin/index.html
+          ! grep -Eq '(src|href)="/(assets|favicon|icons)' dist/admin/index.html
       - name: Block high and critical vulnerabilities, secrets and misconfiguration
         uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
         with:

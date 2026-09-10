@@ -1,5 +1,21 @@
 # JoySong 部署配置字典
 
+## 公网 IP 双入口发布补充
+
+UAT 制品同时包含根 `index.html` 与 `admin/index.html`（构建 base 分别为 `/`、`/admin/`）。
+两者随 Backend/Admin release pair 切换，公网地址保持 `https://121.41.230.98/admin/`。
+
+| 配置 | 契约 |
+| --- | --- |
+| `/etc/joysong-demo/public-ip-tls.enabled` | TLS 事务成功后创建，root:root 0600，内容 `enabled` 加换行；禁止人工删除降级 |
+| `/etc/nginx/conf.d/joysong-public-ip.conf` | 新公网站点 root 指向 current；与启用标记一起参与发布配置摘要检查 |
+| `/var/lib/joysong-deploy/state/deploy.lock` | 发布器和 TLS 脚本共用互斥锁 |
+| 标记不存在、站点不存在 | 首次部署使用本机 HTTP Host 验收，随后单独启用 TLS |
+| 标记不存在、站点存在 | legacy 过渡：保留旧站点，验证配置/HTTPS/摘要，先发布两次兼容构建 |
+| 标记存在 | HTTP 与 HTTPS 双验收；配置、证书或资源异常阻断，禁止降级 |
+
+启用前 current 和已有 previous 必须均包含两份完整构建，详见 [公网 IP HTTPS](./PUBLIC_IP_HTTPS.md)。
+
 > 本文是 [UAT 部署指南](./README.md) 的配置字典，不构成第二套部署流程。
 >
 > 最后核验：2026-09-06

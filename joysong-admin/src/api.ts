@@ -179,8 +179,9 @@ function isAuthenticationRequest(url?: string) {
 
 function redirectToLogin(url?: string) {
   clearAdminToken();
-  if (!isLoginRequest(url) && window.location.pathname !== '/login') {
-    window.location.assign('/login');
+  const loginPath = `${import.meta.env.BASE_URL}login`.replace(/\/{2,}/g, '/');
+  if (!isLoginRequest(url) && window.location.pathname !== loginPath) {
+    window.location.assign(loginPath);
   }
 }
 

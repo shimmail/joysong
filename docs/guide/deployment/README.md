@@ -4,11 +4,18 @@
 >
 > 适用范围：已换为 Ubuntu 24.04 的空白阿里云 ECS 初始化与 UAT Candidate 发布
 >
-> 最后核验：2026-09-06
+> 最后核验：2026-09-10
 >
 > 配置字典：[CONFIGURATION_REFERENCE.md](./CONFIGURATION_REFERENCE.md)
+>
+> App 公网 IP HTTPS 入口：[PUBLIC_IP_HTTPS.md](./PUBLIC_IP_HTTPS.md)
 
 ## 1. 当前结论
+
+PR #16 后续修复将 UAT Admin 制品改为根入口与 `/admin/` 双构建；首次 Candidate 仍先通过
+本机 HTTP 验收，再单独启用 TLS。已有环境先确保 current/previous 均含双构建，才切换公网
+站点。TLS 启用后发布与回滚增加 HTTPS 验收，地址保持不变。完整顺序、legacy 过渡与启用
+标记契约见 [PUBLIC_IP_HTTPS.md](./PUBLIC_IP_HTTPS.md)。本段描述代码契约，不代表已上线。
 
 当前 UAT 使用“快速收敛”方案：
 
@@ -46,9 +53,19 @@ GitHub-hosted Runner
 
 不得创建第二个 UAT 服务、监听 8081、在 tag 发布中修改活动 Nginx 配置、重建既有数据库、改变两个业务 Bucket，或清空上传和私密文件。
 
-部署成功后的固定状态是：
+2026-09-10 已为当前 UAT 增加受信任的公网 IP HTTPS 技术入口：
 
-> UAT Candidate 已部署，公网未 Ready
+> `https://121.41.230.98`
+
+UAT 管理后台入口为 `https://121.41.230.98/admin/`；公网 IP 根路径继续返回 404。
+
+Nginx 对外提供 80/443，后端与 MySQL 仍保持回环监听。该入口用于 UAT App
+联调，不代表生产上线，也不替代尚未完成的人工业务验收。配置、续期和回滚说明见
+[PUBLIC_IP_HTTPS.md](./PUBLIC_IP_HTTPS.md)。
+
+UAT Candidate 发布成功后的固定状态仍是：
+
+> UAT Candidate 已部署；公网 HTTPS 技术入口可用，业务验收未完成
 
 它只证明内部制品、主机事务和本机健康检查通过。ICP、DNS、TLS 和公网业务验收是后续独立门禁。
 
