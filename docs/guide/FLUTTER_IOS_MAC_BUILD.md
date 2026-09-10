@@ -118,7 +118,7 @@ cd ..
 | 场景 | API_BASE_URL |
 | --- | --- |
 | iOS 模拟器，后端或 SSH 隧道运行在这台 Mac | `http://127.0.0.1:8080` |
-| 模拟器或真机连接已配置的 UAT 服务 | 实际可达的 UAT HTTPS 根地址 |
+| 模拟器或真机连接当前 UAT 服务 | `https://121.41.230.98` |
 | 真机连接开发电脑 | 电脑可达地址；额外核查监听地址、防火墙、iOS 本地网络权限和 ATS |
 
 传入服务器根地址即可，不追加 `/api`，Dart 网络层会解析到 `/api/`。UAT/production 强制 HTTPS。
@@ -194,15 +194,25 @@ open ios/Runner.xcworkspace
 4. 分别核对 Debug、Profile、Release 的 Bundle ID 和 Team。Debug 为 `com.joysong.app.flutterdev`，Release 为 `com.joysong.app`；APP_ENV 不会改变 iOS Bundle ID。若现有 ID 不属于自己的团队，调试时使用团队可签名的唯一 ID。当前暂不使用 Google 登录，无需配置 Google OAuth。
 5. 用 USB 连接 iPhone，解锁并选择“信任此电脑”。在需要的 iOS 版本上开启 设置 → 隐私与安全性 → 开发者模式，并按提示重启。
 6. 在 Xcode 设备窗口等待配对和支持组件准备完毕，执行 `flutter devices` 取得设备 ID。
-7. 使用已验证、具有有效证书的 HTTPS 测试地址运行；以下域名是占位值：
+7. 使用当前 UAT 公网 IP HTTPS 地址运行：
 
 ```bash
 flutter run -d "实际iPhone设备ID" \
   --dart-define=APP_ENV=uat \
-  --dart-define=API_BASE_URL=https://实际UAT域名
+  --dart-define=API_BASE_URL=https://121.41.230.98
 ```
 
 当前 UAT 模式使用密码登录，适合先验证基础链路。个人账号可用于受限制的真机开发测试；TestFlight/App Store 分发需要对应开发者计划资格。设备设置依据 [Flutter 真机配置指南](https://docs.flutter.dev/platform-integration/ios/setup)。
+
+仅验证 iOS Release 编译且暂不签名时，在 Mac 上执行：
+
+```bash
+flutter build ios --release --no-codesign \
+  --dart-define=APP_ENV=uat \
+  --dart-define=API_BASE_URL=https://121.41.230.98
+```
+
+该命令生成的是 UAT 配置，不是生产版本。需要安装到真机或上传 TestFlight 时，仍需在 Xcode 中配置有效签名并按下节生成 IPA。
 
 ## 9. 验证平台功能，再构建 IPA
 
