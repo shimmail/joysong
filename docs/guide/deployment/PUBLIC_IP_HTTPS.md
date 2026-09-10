@@ -5,10 +5,12 @@
 ## 固定边界
 
 - App API 根地址为 `https://121.41.230.98`。
+- UAT 管理后台入口为 `https://121.41.230.98/admin/`。
 - 该地址仅用于当前 UAT，不能写入 production workflow 或描述为正式上线。
 - Nginx 仅对公网提供 TCP 80/443；80 除 ACME HTTP-01 外均跳转 HTTPS。
 - Backend 继续只监听 `127.0.0.1:8080`，MySQL 继续只监听 `127.0.0.1:3306`。
 - 安全组和主机防火墙不得开放 8080、3306；公网 IP 入口不提供管理后台首页。
+- 管理后台仅挂载在 `/admin/`，公网 IP 根路径继续返回 404。
 - 证书是 Let's Encrypt `shortlived` IP 证书，必须由 Certbot 5.4 或更高版本自动续期。
 
 ## 启用与验证
@@ -21,6 +23,16 @@
 启用前必须在受控目录备份 `/etc/nginx` 与 `/etc/joysong-demo/joysong.env`。启用后从
 ECS 外部验证 HTTP 跳转、HTTPS 证书 SAN、健康检查和核心 App API，同时确认公网
 8080/3306 均不可达。证书续期 hook 必须先通过 `nginx -t` 再平滑 reload。
+
+管理后台使用子路径构建，构建命令为：
+
+```bash
+cd joysong-admin
+VITE_BASE_PATH=/admin/ npm run build
+```
+
+将 `dist/` 内容部署到 `/var/www/joysong-demo/public-ip-ui/admin/`。不得把管理后台改为公网
+IP 根路径，也不得为此开放后端或数据库端口。
 
 ## 回滚
 

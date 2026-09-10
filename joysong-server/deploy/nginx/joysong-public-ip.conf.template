@@ -29,6 +29,16 @@ server {
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Strict-Transport-Security "max-age=31536000" always;
 
+    location = /admin {
+        return 301 /admin/;
+    }
+
+    location ^~ /admin/ {
+        root /var/www/joysong-demo/public-ip-ui;
+        index index.html;
+        try_files $uri $uri/ /admin/index.html;
+    }
+
     location ^~ /images/ {
         alias /var/lib/joysong-demo/uploads/;
         autoindex off;

@@ -52,6 +52,8 @@ GitHub-hosted Runner
 
 > `https://121.41.230.98`
 
+UAT 管理后台入口为 `https://121.41.230.98/admin/`；公网 IP 根路径继续返回 404。
+
 Nginx 对外提供 80/443，后端与 MySQL 仍保持回环监听。该入口用于 UAT App
 联调，不代表生产上线，也不替代尚未完成的人工业务验收。配置、续期和回滚说明见
 [PUBLIC_IP_HTTPS.md](./PUBLIC_IP_HTTPS.md)。

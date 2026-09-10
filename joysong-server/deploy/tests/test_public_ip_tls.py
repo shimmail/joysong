@@ -38,6 +38,8 @@ class PublicIpTlsDeploymentTest(unittest.TestCase):
         nginx = TEMPLATE.read_text(encoding="utf-8")
         for route in (
             "location ^~ /.well-known/acme-challenge/",
+            "location = /admin",
+            "location ^~ /admin/",
             "location = /actuator/health",
             "location = /api/auth/login",
             "location /api/",
@@ -50,6 +52,8 @@ class PublicIpTlsDeploymentTest(unittest.TestCase):
         self.assertIn("client_max_body_size 52m;", nginx)
         self.assertIn("proxy_buffering off;", nginx)
         self.assertIn("return 301 https://__PUBLIC_IP__$request_uri;", nginx)
+        self.assertIn("root /var/www/joysong-demo/public-ip-ui;", nginx)
+        self.assertIn("try_files $uri $uri/ /admin/index.html;", nginx)
         self.assertNotIn("/var/www/joysong-demo/current", nginx)
 
     def test_runtime_origins_change_without_exposing_private_ports(self):
