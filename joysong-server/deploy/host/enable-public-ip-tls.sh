@@ -9,7 +9,8 @@ readonly CHALLENGE_SITE=/etc/nginx/conf.d/joysong-public-ip-challenge.conf
 readonly DEPLOY_HOOK=/etc/letsencrypt/renewal-hooks/deploy/joysong-nginx-reload
 readonly ENV_FILE=/etc/joysong-demo/joysong.env
 readonly SERVICE=joysong-demo.service
-readonly LOCK_FILE=/run/lock/joysong-public-ip-tls.lock
+readonly LOCK_FILE=/var/lib/joysong-deploy/state/deploy.lock
+readonly ENABLED_FILE=/etc/joysong-demo/public-ip-tls.enabled
 readonly DRY_RUN_LOG=/var/log/letsencrypt/joysong-renew-dry-run.log
 
 TXN_DIR=''
@@ -24,6 +25,9 @@ CERT_NAME=''
 STAGING_CERT_NAME=''
 CHALLENGE_ACTIVATED=false
 REUSE_CERT=false
+SERVICE_CHANGED=false
+TIMER_CHANGED=false
+NGINX_CHANGED=false
 declare -A INITIAL_PRESENT=()
 declare -A BACKUP_PATH=()
 declare -a STAGING_PATHS=()
@@ -32,7 +36,7 @@ fail() { printf 'JoySong public IP TLS setup failed: %s\n' "$*" >&2; exit 2; }
 
 version_at_least_5_4() {
   certbot --version 2>&1 | sed -n 's/^certbot \([0-9][0-9.]*\)$/\1/p' |
-    awk -F. '{ exit !($1 > 5 || ($1 == 5 && $2 >= 4)) }'
+    awk -F. '{ valid = ($1 > 5 || ($1 == 5 && $2 >= 4)) } END { exit !valid }'
 }
 
 require_regular_single_link() {
@@ -77,7 +81,7 @@ require_restorable_unit_state() {
 preflight() {
   local template="$1" required_command key
   for required_command in certbot nginx openssl python3 curl flock sed install stat systemctl ss \
-    grep awk head cp mv rm mktemp dirname basename; do
+    grep awk head cp mv rm mktemp dirname basename cmp sleep; do
     command -v "$required_command" >/dev/null ||
       fail "required command is unavailable: $required_command"
   done
@@ -92,7 +96,7 @@ preflight() {
     fail "Certbot deploy-hook directory is unavailable or unsafe"
   [[ -d /var/backups && ! -L /var/backups ]] || fail "backup root is unavailable or unsafe"
   systemctl is-active --quiet nginx || fail "Nginx must be active before setup"
-  nginx -t >/dev/null
+  nginx -t >/dev/null || fail "existing Nginx configuration is invalid; restore the certificate/private key or configuration reported above before retrying"
   systemctl cat "$SERVICE" >/dev/null 2>&1 || fail "$SERVICE is unavailable"
   version_at_least_5_4 || fail "Certbot 5.4 or newer is required before setup"
   detect_renewal_timer
@@ -110,8 +114,50 @@ preflight() {
   require_loopback_listener 3306
   curl --fail --silent --show-error --max-time 5 \
     http://127.0.0.1:8080/actuator/health >/dev/null || fail "$SERVICE is unhealthy before setup"
-  [[ -f /var/www/joysong-demo/current/index.html ]] ||
-    fail "the atomically managed Admin current release is unavailable"
+  require_admin_release /var/www/joysong-demo/current
+  if [[ -e /var/www/joysong-demo/previous || -L /var/www/joysong-demo/previous ]]; then
+    require_admin_release /var/www/joysong-demo/previous
+  fi
+}
+
+require_admin_release() {
+  python3 -I - "$1" <<'PY'
+import os, pathlib, sys
+from html.parser import HTMLParser
+root = pathlib.Path(sys.argv[1]).resolve(strict=True)
+def safe_file(path):
+    for member in (path, *path.parents):
+        if member == root.parent:
+            break
+        info = member.lstat()
+        if member.is_symlink() or info.st_mode & 0o022 or info.st_uid != os.geteuid():
+            raise SystemExit(f'{member}: linked, writable, or incorrectly owned release member')
+    if not path.is_file() or path.stat().st_nlink != 1:
+        raise SystemExit(f'{path}: release member must be a regular single-link file')
+class Assets(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.assets = []
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        value = attrs.get('src') if tag == 'script' else attrs.get('href') if tag == 'link' else None
+        if value and '/assets/' in value:
+            self.assets.append(value)
+for prefix in ('/', '/admin/'):
+    parser = Assets()
+    index = root / prefix.lstrip('/') / 'index.html'
+    safe_file(index)
+    parser.feed(index.read_text())
+    if not parser.assets:
+        raise SystemExit(f'{root}: missing {prefix} build assets; publish a compatible release first')
+    for value in parser.assets:
+        path = root / value.lstrip('/')
+        if not value.startswith(prefix + 'assets/') or not path.is_relative_to(root) or not path.is_file():
+            raise SystemExit(f'{root}: incompatible or missing asset {value}; publish a compatible release first')
+        if not path.resolve().is_relative_to(root):
+            raise SystemExit(f'{root}: asset escapes release')
+        safe_file(path)
+PY
 }
 
 track_file() {
@@ -119,7 +165,7 @@ track_file() {
   if [[ -e "$path" || -L "$path" ]]; then
     require_regular_single_link "$path" "$key"
     INITIAL_PRESENT["$key"]=true
-    BACKUP_PATH["$key"]="$TXN_DIR/$key"
+    BACKUP_PATH["$key"]="$TXN_DIR/original-$key"
     cp -a -- "$path" "${BACKUP_PATH[$key]}"
   else
     INITIAL_PRESENT["$key"]=false
@@ -168,12 +214,19 @@ rollback() {
   restore_file site "$SITE" || failed=true
   restore_file challenge "$CHALLENGE_SITE" || failed=true
   restore_file dry_log "$DRY_RUN_LOG" || failed=true
+  restore_file enabled "$ENABLED_FILE" || failed=true
   ((${#STAGING_PATHS[@]} == 0)) || rm -f -- "${STAGING_PATHS[@]}" || failed=true
-  if nginx -t >/dev/null 2>&1; then systemctl reload nginx || failed=true
-  else failed=true
+  if [[ "$NGINX_CHANGED" == true ]]; then
+    if nginx -t >/dev/null 2>&1; then systemctl reload nginx || failed=true
+    else failed=true
+    fi
   fi
-  restore_unit_state "$RENEWAL_TIMER" "$TIMER_ACTIVE" "$TIMER_ENABLED" false || failed=true
-  restore_unit_state "$SERVICE" "$SERVICE_ACTIVE" "$SERVICE_ENABLED" true || failed=true
+  if [[ "$TIMER_CHANGED" == true ]]; then
+    restore_unit_state "$RENEWAL_TIMER" "$TIMER_ACTIVE" "$TIMER_ENABLED" false || failed=true
+  fi
+  if [[ "$SERVICE_CHANGED" == true ]]; then
+    restore_unit_state "$SERVICE" "$SERVICE_ACTIVE" "$SERVICE_ENABLED" true || failed=true
+  fi
   if [[ -n "$STAGING_CERT_NAME" && -d "/etc/letsencrypt/live/$STAGING_CERT_NAME" ]]; then
     certbot delete --cert-name "$STAGING_CERT_NAME" --non-interactive >/dev/null 2>&1 || failed=true
   fi
@@ -181,8 +234,7 @@ rollback() {
     certbot delete --cert-name "$CERT_NAME" --non-interactive >/dev/null 2>&1 || failed=true
   fi
   nginx -t >/dev/null 2>&1 || failed=true
-  [[ "$SERVICE_ACTIVE" != active ]] || curl --fail --silent --max-time 5 \
-    http://127.0.0.1:8080/actuator/health >/dev/null || failed=true
+  [[ "$SERVICE_ACTIVE" != active ]] || wait_for_health || failed=true
   if [[ "$failed" == true ]]; then
     printf 'CRITICAL: public IP TLS rollback was incomplete; inspect %s\n' "$TXN_DIR" >&2
     exit 3
@@ -192,9 +244,10 @@ rollback() {
 }
 
 atomic_install() {
-  local source="$1" target="$2" mode="$3" staged="${target}.new.$$"
+  local source="$1" target="$2" mode="$3" staged
+  staged="${target}.new.$$"
   STAGING_PATHS+=("$staged")
-  install -o root -g root -m "$mode" "$source" "$staged"
+  install -o root -g root -m "$mode" "$source" "$staged" || return 1
   mv -Tf -- "$staged" "$target"
 }
 
@@ -284,9 +337,7 @@ select_certificate_name() {
     existing="$(sed -n 's#^[[:space:]]*ssl_certificate[[:space:]]\+/etc/letsencrypt/live/\([^/;]*\)/fullchain\.pem;[[:space:]]*$#\1#p' "$SITE" | head -n 1)"
   fi
   if [[ "$existing" =~ ^[A-Za-z0-9._-]+$ ]] &&
-     [[ -f "/etc/letsencrypt/live/$existing/fullchain.pem" ]] &&
-     openssl x509 -checkend 86400 -noout -in "/etc/letsencrypt/live/$existing/fullchain.pem" >/dev/null &&
-     openssl x509 -checkip "$EXPECTED_IP" -noout -in "/etc/letsencrypt/live/$existing/fullchain.pem" >/dev/null; then
+     certificate_usable "$existing"; then
     CERT_NAME="$existing"
     REUSE_CERT=true
   else
@@ -307,13 +358,43 @@ issue_certificates() {
 }
 
 verify_certificate() {
-  openssl x509 -checkend 86400 -noout -in "/etc/letsencrypt/live/$CERT_NAME/fullchain.pem"
-  openssl x509 -checkip "$EXPECTED_IP" -noout -in "/etc/letsencrypt/live/$CERT_NAME/fullchain.pem"
+  certificate_usable "$CERT_NAME" || fail "certificate, matching private key, or renewal configuration is invalid"
+}
+
+certificate_usable() {
+  local name="$1" certificate_key private_key
+  local directory="/etc/letsencrypt/live/$1"
+  [[ -r "$directory/fullchain.pem" && -r "$directory/privkey.pem" &&
+     -s "/etc/letsencrypt/renewal/$name.conf" ]] || return 1
+  python3 -I - "/etc/letsencrypt/renewal/$name.conf" "$directory" <<'PY' || return 1
+import configparser, pathlib, sys
+config = configparser.ConfigParser(interpolation=None)
+try:
+    config.read_string('[lineage]\n' + pathlib.Path(sys.argv[1]).read_text())
+    directory = pathlib.Path(sys.argv[2])
+    for key, filename in [('fullchain', 'fullchain.pem'), ('privkey', 'privkey.pem')]:
+        if pathlib.Path(config['lineage'].get(key, '')) != directory / filename:
+            raise ValueError('renewal lineage does not match certificate')
+    if config['renewalparams'].get('authenticator') != 'webroot':
+        raise ValueError('renewal authenticator must be webroot')
+except (OSError, ValueError, KeyError, configparser.Error):
+    raise SystemExit(1)
+PY
+  openssl x509 -checkend 86400 -noout -in "$directory/fullchain.pem" >/dev/null || return 1
+  openssl x509 -checkip "$EXPECTED_IP" -noout -in "$directory/fullchain.pem" >/dev/null || return 1
+  certificate_key="$(openssl x509 -pubkey -noout -in "$directory/fullchain.pem")" || return 1
+  private_key="$(openssl pkey -pubout -in "$directory/privkey.pem")" || return 1
+  [[ -n "$certificate_key" && "$certificate_key" == "$private_key" ]]
 }
 
 wait_for_health() {
-  curl --retry 30 --retry-connrefused --retry-delay 2 --max-time 5 \
-    --fail --silent --show-error http://127.0.0.1:8080/actuator/health >/dev/null
+  local deadline=$((SECONDS + 90))
+  while ((SECONDS < deadline)); do
+    if curl --noproxy '*' --max-time 5 --fail --silent --show-error \
+      http://127.0.0.1:8080/actuator/health >/dev/null; then return 0; fi
+    sleep 2
+  done
+  return 1
 }
 
 verify_https_routes() {
@@ -332,7 +413,7 @@ main() {
   local template="${1:-}" env_staged
   [[ "$EUID" -eq 0 ]] || fail "run as root"
   (($# == 1)) || fail "usage: enable-public-ip-tls.sh NGINX_TEMPLATE"
-  mkdir -p /run/lock
+  [[ -d "$(dirname "$LOCK_FILE")" && ! -L "$LOCK_FILE" ]] || fail "deployment state directory is unavailable or lock is unsafe"
   exec 9>"$LOCK_FILE"
   flock -n 9 || fail "another public IP TLS setup is already running"
 
@@ -346,6 +427,7 @@ main() {
   track_file hook "$DEPLOY_HOOK"
   track_file env "$ENV_FILE"
   track_file dry_log "$DRY_RUN_LOG"
+  track_file enabled "$ENABLED_FILE"
   printf 'SERVICE_ACTIVE=%s\nSERVICE_ENABLED=%s\nTIMER=%s\nTIMER_ACTIVE=%s\nTIMER_ENABLED=%s\n' \
     "$SERVICE_ACTIVE" "$SERVICE_ENABLED" "$RENEWAL_TIMER" "$TIMER_ACTIVE" "$TIMER_ENABLED" \
     >"$TXN_DIR/unit-state"
@@ -358,6 +440,7 @@ main() {
     grep -Fq 'location ^~ /.well-known/acme-challenge/' "$SITE" ||
       fail "existing public IP site cannot serve ACME without a conflicting challenge server"
   else
+    NGINX_CHANGED=true
     atomic_install "$TXN_DIR/challenge.conf" "$CHALLENGE_SITE" 0644
     CHALLENGE_ACTIVATED=true
     nginx -t
@@ -367,21 +450,26 @@ main() {
   verify_certificate
   validate_nginx_candidate "$TXN_DIR/site.conf"
 
+  NGINX_CHANGED=true
   atomic_install "$TXN_DIR/site.conf" "$SITE" 0644
   atomic_install "$TXN_DIR/hook" "$DEPLOY_HOOK" 0755
   [[ "$CHALLENGE_ACTIVATED" == false ]] || rm -f -- "$CHALLENGE_SITE"
   nginx -t
   systemctl reload nginx
 
+  if ! cmp -s "$TXN_DIR/joysong.env" "$ENV_FILE"; then
   env_staged="$ENV_FILE.new.$$"
   STAGING_PATHS+=("$env_staged")
   install -o "$(stat -c %u "$ENV_FILE")" -g "$(stat -c %g "$ENV_FILE")" \
     -m "$(stat -c %a "$ENV_FILE")" "$TXN_DIR/joysong.env" "$env_staged"
   mv -Tf -- "$env_staged" "$ENV_FILE"
+  SERVICE_CHANGED=true
   systemctl restart "$SERVICE"
+  fi
   wait_for_health
   verify_https_routes
 
+  TIMER_CHANGED=true
   systemctl enable --now "$RENEWAL_TIMER"
   certbot renew --cert-name "$CERT_NAME" --dry-run --run-deploy-hooks \
     --no-random-sleep-on-renew >"$DRY_RUN_LOG" 2>&1
@@ -393,9 +481,11 @@ main() {
   verify_certificate
   verify_https_routes
 
+  printf 'enabled\n' >"$TXN_DIR/enabled"
+  atomic_install "$TXN_DIR/enabled" "$ENABLED_FILE" 0600
   COMMITTED=true
   printf 'Public HTTPS endpoint enabled at https://%s (transaction backup: %s)\n' \
     "$EXPECTED_IP" "$TXN_DIR"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

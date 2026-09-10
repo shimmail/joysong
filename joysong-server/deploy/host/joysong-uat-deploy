@@ -72,6 +72,9 @@ readonly STAGING_DATA="$DATA_ROOT/upload-staging"
 CONFIG_FILE="$(host_path /etc/joysong-demo/joysong.env)"
 MYSQL_CONFIG="$(host_path /etc/mysql/joysong-uat-backup.cnf)"
 NGINX_SITE="$(host_path /etc/nginx/conf.d/joysong-public.conf)"
+PUBLIC_IP_SITE="$(host_path /etc/nginx/conf.d/joysong-public-ip.conf)"
+PUBLIC_IP_TLS_STATE="$(host_path /etc/joysong-demo/public-ip-tls.enabled)"
+readonly PUBLIC_IP_SITE PUBLIC_IP_TLS_STATE
 SYSTEMD_UNIT="$(host_path /etc/systemd/system/joysong-demo.service)"
 HOST_CONTRACT="$(host_path /etc/joysong-demo/host-contract)"
 DEPLOY_ROOT="$(host_path /var/lib/joysong-deploy)"
@@ -345,7 +348,53 @@ nginx_config_sha() {
   actual="$(file_sha "$NGINX_SITE")"
   expected="$(read_assignment "$HOST_CONTRACT" NGINX_SITE_SHA256 || true)"
   [[ "$expected" =~ $SHA64_RE && "$actual" == "$expected" ]] || return 1
-  printf '%s' "$actual"
+  validate_public_ip_state || return 1
+  if path_present "$PUBLIC_IP_TLS_STATE"; then
+    run_with_timeout "$COMMAND_TIMEOUT_SECONDS" nginx -t || return 1
+    printf '%s\n%s\n%s\n' "$actual" "$(file_sha "$PUBLIC_IP_SITE")" "$(file_sha "$PUBLIC_IP_TLS_STATE")" | sha256sum | awk '{print $1}'
+  elif path_present "$PUBLIC_IP_SITE"; then
+    printf '%s\n%s\nlegacy\n' "$actual" "$(file_sha "$PUBLIC_IP_SITE")" | sha256sum | awk '{print $1}'
+  else
+    printf '%s' "$actual"
+  fi
+}
+
+validate_public_ip_state() {
+  if path_present "$PUBLIC_IP_TLS_STATE"; then
+    require_root_protected_file "$PUBLIC_IP_TLS_STATE" "public IP TLS state"
+    require_root_protected_file "$PUBLIC_IP_SITE" "public IP Nginx site"
+    [[ "$(file_sha "$PUBLIC_IP_TLS_STATE")" == "$(printf 'enabled\n' | sha256sum | awk '{print $1}')" ]] || return 1
+    if [[ -z "$PATH_PREFIX" ]]; then
+      [[ "$(stat -c '%U:%G:%a' "$PUBLIC_IP_TLS_STATE")" == root:root:600 ]] || return 1
+    fi
+  elif path_present "$PUBLIC_IP_SITE"; then
+    require_root_protected_file "$PUBLIC_IP_SITE" "legacy public IP Nginx site"
+    if ! grep -Eq '^[[:space:]]*root[[:space:]]+/var/www/joysong-demo/public-ip-ui[[:space:]]*;' "$PUBLIC_IP_SITE" ||
+      grep -Eq '^[[:space:]]*[^#].*/var/www/joysong-demo/current' "$PUBLIC_IP_SITE"; then
+        printf '%s\n' 'Public IP site has no TLS state and is not the standalone legacy site; restore the original standalone site through a controlled recovery before transition. Do not remove or fabricate the TLS state marker.' >&2
+        return 1
+    fi
+    run_with_timeout "$COMMAND_TIMEOUT_SECONDS" nginx -t || return 1
+    verify_legacy_public_ip || return 1
+    printf '%s\n' 'Legacy public IP site retained: this release validates HTTP; complete two compatible releases and the TLS enable transaction to activate atomic /admin publication.' >&2
+  fi
+}
+
+verify_legacy_public_ip() {
+  local health
+  health="$(run_with_timeout 10 curl -q --noproxy '*' --fail --silent --show-error --max-time 5 \
+    --resolve "$ADMIN_PUBLIC_IP:443:127.0.0.1" "https://$ADMIN_PUBLIC_IP/actuator/health")" || return 1
+  "$PYTHON_BIN" -I -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("status") == "UP" else 1)' <<<"$health" || return 1
+  run_with_timeout 10 curl -q --noproxy '*' --fail --silent --show-error --max-time 5 \
+    --resolve "$ADMIN_PUBLIC_IP:443:127.0.0.1" --output /dev/null "https://$ADMIN_PUBLIC_IP/admin/"
+}
+
+validate_public_admin_release() {
+  local release="$1" asset
+  require_regular_file "$release/admin/index.html" "public Admin index"
+  asset="$(grep -Eo '/admin/assets/[A-Za-z0-9._-]+\.(js|css)' "$release/admin/index.html" | head -n 1)" || return 1
+  [[ -n "$asset" ]] || return 1
+  require_regular_file "$release$asset" "public Admin asset"
 }
 
 validate_mysql_option_file() {
@@ -621,31 +670,39 @@ verify_service_contract() {
 }
 
 verify_admin_locally() {
-  local expected_admin="$1" expected_sha response root_sha deep_sha asset_uri asset_relative asset_path asset_sha
+  validate_public_ip_state || return 1
+  verify_admin_endpoint "$1" '' 'http://127.0.0.1' -H 'Host: joyingsong.net' || return 1
+  if path_present "$PUBLIC_IP_TLS_STATE"; then
+    validate_public_admin_release "$1" || return 1
+    verify_admin_endpoint "$1" /admin "https://$ADMIN_PUBLIC_IP" --resolve "$ADMIN_PUBLIC_IP:443:127.0.0.1" || return 1
+  fi
+}
+
+verify_admin_endpoint() {
+  local release="$1" prefix="$2" origin="$3"
+  shift 3
+  local expected_admin="$release$prefix"
+  local expected_sha response root_sha deep_sha asset_uri asset_path asset_sha
   expected_sha="$(file_sha "$expected_admin/index.html")" || return 1
   response="$(mktemp "$STATE_ROOT/.admin-response.XXXXXX")" || return 1
     if ! run_with_timeout 10 curl -q --noproxy '*' --fail --silent --show-error --max-time 5 \
-      --resolve "$ADMIN_PUBLIC_IP:443:127.0.0.1" --output "$response" \
-      "https://$ADMIN_PUBLIC_IP/admin/"; then
+      "$@" --output "$response" "$origin$prefix/"; then
     rm -f "$response"; return 1
   fi
   root_sha="$(file_sha "$response")"
   if ! run_with_timeout 10 curl -q --noproxy '*' --fail --silent --show-error --max-time 5 \
-      --resolve "$ADMIN_PUBLIC_IP:443:127.0.0.1" --output "$response" \
-      "https://$ADMIN_PUBLIC_IP/admin/orders"; then
+      "$@" --output "$response" "$origin$prefix/orders"; then
     rm -f "$response"; return 1
   fi
   deep_sha="$(file_sha "$response")"
   asset_uri="$(grep -Eo '/(admin/)?assets/[A-Za-z0-9._-]+\.(js|css)' "$expected_admin/index.html" | head -n 1)"
   [[ -n "$asset_uri" ]] || { rm -f "$response"; return 1; }
-  asset_relative="${asset_uri#/admin/}"
-  asset_relative="${asset_relative#/}"
-  asset_path="$expected_admin/$asset_relative"
+  [[ "$asset_uri" == "$prefix/assets/"* ]] || { rm -f "$response"; return 1; }
+  asset_path="$release$asset_uri"
   [[ -f "$asset_path" && ! -L "$asset_path" ]] || { rm -f "$response"; return 1; }
   asset_sha="$(file_sha "$asset_path")"
   if ! run_with_timeout 10 curl -q --noproxy '*' --fail --silent --show-error --max-time 5 \
-      --resolve "$ADMIN_PUBLIC_IP:443:127.0.0.1" --output "$response" \
-      "https://$ADMIN_PUBLIC_IP$asset_uri"; then
+      "$@" --output "$response" "$origin$asset_uri"; then
     rm -f "$response"; return 1
   fi
   [[ "$(file_sha "$response")" == "$asset_sha" ]] || { rm -f "$response"; return 1; }
@@ -669,6 +726,12 @@ load_current_state() {
   CURRENT_FLYWAY_SHA="$(flyway_snapshot)" || fail "Flyway history validation failed"
   CURRENT_CONFIG_SHA="$(file_sha "$CONFIG_FILE")"
   CURRENT_NGINX_SHA="$(nginx_config_sha)"
+  if path_present "$PUBLIC_IP_TLS_STATE"; then
+    validate_public_admin_release "$CURRENT_ADMIN" || fail "current release lacks public Admin build"
+    if path_present "$ADMIN_PREVIOUS"; then
+      validate_public_admin_release "$(safe_link_target "$ADMIN_PREVIOUS" "$ADMIN_RELEASES")" || fail "previous release lacks public Admin build"
+    fi
+  fi
   CURRENT_SYSTEMD_SHA="$(systemd_contract_sha)" || fail "systemd service contract validation failed"
   verify_service_contract "$CURRENT_BACKEND"
   verify_admin_locally "$CURRENT_ADMIN" || fail "current Admin root/deep-route contract failed"
@@ -716,6 +779,9 @@ verify_candidate() {
     fail "candidate bundle verification failed"
   CANDIDATE_MIGRATION_SHA="$(sed -n 's/^DATABASE_MIGRATIONS_SHA256=//p' <<<"$output")"
   [[ "$CANDIDATE_MIGRATION_SHA" =~ $SHA64_RE ]] || fail "candidate migration digest is missing"
+  if path_present "$PUBLIC_IP_TLS_STATE"; then
+    validate_public_admin_release "$CANDIDATE_ROOT/admin" || fail "candidate lacks public Admin build"
+  fi
   if [[ "$DEPLOY_MODE" == existing ]]; then
     [[ "$CANDIDATE_MIGRATION_SHA" == "$CURRENT_MIGRATION_SHA" ]] ||
       fail "candidate migrations differ; an isolated restore/migration/rollback drill is required"

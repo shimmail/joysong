@@ -34,23 +34,9 @@ server {
     }
 
     location ^~ /admin/ {
-        alias /var/www/joysong-demo/current/;
+        root /var/www/joysong-demo/current;
         index index.html;
         try_files $uri $uri/ /admin/index.html;
-    }
-
-    # Compatibility for the current pre-migration UAT Admin. Remove after the
-    # first /admin/-based candidate has been accepted and previous is retired.
-    location ^~ /assets/ {
-        alias /var/www/joysong-demo/current/assets/;
-    }
-
-    location = /favicon.svg {
-        alias /var/www/joysong-demo/current/favicon.svg;
-    }
-
-    location = /icons.svg {
-        alias /var/www/joysong-demo/current/icons.svg;
     }
 
     location ^~ /images/ {

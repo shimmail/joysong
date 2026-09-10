@@ -62,12 +62,117 @@ GNU_BASH = find_gnu_bash()
 
 
 class JoySongUatDeployContractTest(unittest.TestCase):
-    def test_admin_health_checks_use_the_uat_admin_subpath(self):
-        source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn('"https://$ADMIN_PUBLIC_IP/admin/"', source)
-        self.assertIn('"https://$ADMIN_PUBLIC_IP/admin/orders"', source)
-        self.assertIn('"https://$ADMIN_PUBLIC_IP$asset_uri"', source)
-        self.assertIn('--resolve "$ADMIN_PUBLIC_IP:443:127.0.0.1"', source)
+    def test_admin_health_checks_select_http_then_both_endpoints(self):
+        self.assert_bash_ok(r'''
+            mkdir -p "$STATE_ROOT" "$(dirname "$PUBLIC_IP_TLS_STATE")" "$(dirname "$PUBLIC_IP_SITE")"
+            release="$fixture/release"
+            mkdir -p "$release/assets" "$release/admin/assets"
+            printf '<script src="/assets/root.js"></script>' >"$release/index.html"
+            printf '<script src="/admin/assets/public.js"></script>' >"$release/admin/index.html"
+            printf root >"$release/assets/root.js"
+            printf public >"$release/admin/assets/public.js"
+            run_with_timeout() {
+              local output='' url="${!#}"
+              printf '%s\n' "$*" >>"$fixture/requests"
+              while (($#)); do
+                if [[ "$1" == --output ]]; then output="$2"; shift; fi
+                shift
+              done
+              case "$url" in
+                http://127.0.0.1/|http://127.0.0.1/orders) cp "$release/index.html" "$output" ;;
+                http://127.0.0.1/assets/root.js) cp "$release/assets/root.js" "$output" ;;
+                https://*/admin/|https://*/admin/orders) cp "$release/admin/index.html" "$output" ;;
+                https://*/admin/assets/public.js) cp "$release/admin/assets/public.js" "$output" ;;
+                *) return 1 ;;
+              esac
+            }
+            verify_admin_locally "$release"
+            [[ "$(wc -l <"$fixture/requests")" == 3 ]]
+            grep -q 'Host: joyingsong.net' "$fixture/requests"
+            printf 'enabled\n' >"$PUBLIC_IP_TLS_STATE"
+            printf site >"$PUBLIC_IP_SITE"
+            verify_admin_locally "$release"
+            [[ "$(wc -l <"$fixture/requests")" == 9 ]]
+            rm "$release/admin/assets/public.js"
+            if (verify_admin_locally "$release"); then exit 1; fi
+            rm "$PUBLIC_IP_TLS_STATE"
+            if (verify_admin_locally "$release"); then exit 1; fi
+        ''')
+
+    def test_nginx_digest_includes_public_site_and_tls_state(self):
+        self.assert_bash_ok(r'''
+            run_with_timeout() { [[ "$2 $3" == 'nginx -t' ]]; }
+            mkdir -p "$(dirname "$NGINX_SITE")" "$(dirname "$HOST_CONTRACT")"
+            printf base >"$NGINX_SITE"
+            printf 'NGINX_SITE_SHA256=%s\n' "$(file_sha "$NGINX_SITE")" >"$HOST_CONTRACT"
+            before="$(nginx_config_sha)"
+            printf 'enabled\n' >"$PUBLIC_IP_TLS_STATE"
+            printf site >"$PUBLIC_IP_SITE"
+            enabled="$(nginx_config_sha)"
+            [[ "$enabled" != "$before" ]]
+            printf changed >"$PUBLIC_IP_SITE"
+            [[ "$(nginx_config_sha)" != "$enabled" ]]
+            printf invalid >"$PUBLIC_IP_TLS_STATE"
+            if (nginx_config_sha); then exit 1; fi
+        ''')
+
+    def test_legacy_root_release_can_upgrade_before_tls_but_never_downgrades_after(self):
+        self.assert_bash_ok(r'''
+            mkdir -p "$(dirname "$PUBLIC_IP_TLS_STATE")" "$(dirname "$PUBLIC_IP_SITE")"
+            release="$fixture/legacy"
+            mkdir -p "$release"
+            printf legacy >"$release/index.html"
+            verify_admin_endpoint() {
+              printf '%s\n' "$3" >>"$fixture/endpoints"
+              [[ "$3" == http://127.0.0.1 ]]
+            }
+            verify_admin_locally "$release"
+            [[ "$(wc -l <"$fixture/endpoints")" == 1 ]]
+            printf 'enabled\n' >"$PUBLIC_IP_TLS_STATE"
+            printf site >"$PUBLIC_IP_SITE"
+            if (verify_admin_locally "$release"); then exit 1; fi
+            mkdir -p "$release/admin/assets"
+            printf '<script src="/admin/assets/public.js"></script>' >"$release/admin/index.html"
+            printf public >"$release/admin/assets/public.js"
+            if (verify_admin_locally "$release"); then exit 1; fi
+            [[ "$(tail -n 1 "$fixture/endpoints")" == "https://$ADMIN_PUBLIC_IP" ]]
+        ''')
+
+    def test_legacy_public_site_allows_transition_and_remains_integrity_protected(self):
+        self.assert_bash_ok(r'''
+            python3() { "$TEST_PYTHON_BIN" "$@"; }
+            mkdir -p "$(dirname "$NGINX_SITE")" "$(dirname "$HOST_CONTRACT")"
+            printf base >"$NGINX_SITE"
+            printf 'NGINX_SITE_SHA256=%s\n' "$(file_sha "$NGINX_SITE")" >"$HOST_CONTRACT"
+            printf 'root /var/www/joysong-demo/public-ip-ui;\n' >"$PUBLIC_IP_SITE"
+            run_with_timeout() {
+              printf '%s\n' "$*" >>"$fixture/checks"
+              case "${!#}" in
+                -t) return 0 ;;
+                https://*/actuator/health) printf '{"status":"UP"}' ;;
+                https://*/admin/) return 0 ;;
+                *) return 1 ;;
+              esac
+            }
+            before="$(nginx_config_sha 2>"$fixture/notice")"
+            grep -q 'Legacy public IP site retained' "$fixture/notice"
+            grep -q '/actuator/health' "$fixture/checks"
+            grep -q '/admin/' "$fixture/checks"
+            verify_admin_endpoint() { [[ "$2" == '' && "$3" == http://127.0.0.1 ]]; }
+            verify_admin_locally "$fixture/root-only"
+            [[ ! -e "$PUBLIC_IP_TLS_STATE" ]]
+            printf '# changed\n' >>"$PUBLIC_IP_SITE"
+            [[ "$(nginx_config_sha)" != "$before" ]]
+            printf 'root /var/www/joysong-demo/current;\n' >>"$PUBLIC_IP_SITE"
+            if (nginx_config_sha); then exit 1; fi
+            if (verify_admin_locally "$fixture/root-only"); then exit 1; fi
+            printf 'root /var/www/joysong-demo/current;\n' >"$PUBLIC_IP_SITE"
+            if (validate_public_ip_state); then exit 1; fi
+            printf 'root /var/www/joysong-demo/public-ip-ui;\n' >"$PUBLIC_IP_SITE"
+            run_with_timeout() { return 1; }
+            if (nginx_config_sha); then exit 1; fi
+            if (verify_admin_locally "$fixture/root-only"); then exit 1; fi
+        ''')
 
     maxDiff = None
 

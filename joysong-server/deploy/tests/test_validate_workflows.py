@@ -58,9 +58,10 @@ class QualityGatesValidationTest(unittest.TestCase):
     def test_admin_subpath_build_is_limited_to_uat(self) -> None:
         uat = UAT_WORKFLOW.read_text(encoding="utf-8")
         prod = PROD_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("VITE_BASE_PATH: /admin/", uat)
-        self.assertIn("npm run build", uat)
-        self.assertNotIn("VITE_BASE_PATH: /admin/", prod)
+        self.assertIn("VITE_BASE_PATH=/ npm run build", uat)
+        self.assertIn("VITE_BASE_PATH=/admin/ npm run build -- --outDir dist/admin", uat)
+        self.assertIn("dist/admin/index.html", uat)
+        self.assertNotIn("VITE_BASE_PATH=/admin/", prod)
 
 
 if __name__ == "__main__":

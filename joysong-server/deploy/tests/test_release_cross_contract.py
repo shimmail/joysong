@@ -230,6 +230,13 @@ class ReleaseCrossContractTest(unittest.TestCase):
             (admin / "assets" / "app.js").write_text(
                 "console.log('uat');\n", encoding="utf-8"
             )
+            (admin / "admin" / "assets").mkdir(parents=True)
+            (admin / "admin" / "index.html").write_text(
+                '<script src="/admin/assets/app.js"></script>\n', encoding="utf-8"
+            )
+            (admin / "admin" / "assets" / "app.js").write_text(
+                "console.log('public-uat');\n", encoding="utf-8"
+            )
             sbom = root / "sbom.cdx.json"
             sbom.write_text(
                 json.dumps({"bomFormat": "CycloneDX", "specVersion": "1.6"}) + "\n",
@@ -325,6 +332,11 @@ class ReleaseCrossContractTest(unittest.TestCase):
             )
             self.assertEqual(0, migration_only.returncode, migration_only.stderr)
             self.assertEqual(expected_migration_digest, migration_only.stdout.strip())
+            for relative in ("admin/index.html", "admin/assets/app.js"):
+                self.assertEqual(
+                    (admin / relative).read_bytes(),
+                    (staging / "admin" / relative).read_bytes(),
+                )
 
     def test_host_verifier_streams_tar_headers_and_preflights_zip_directory(self):
         source = HOST_VERIFIER.read_text(encoding="utf-8")

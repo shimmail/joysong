@@ -12,6 +12,11 @@
 
 ## 1. 当前结论
 
+PR #16 后续修复将 UAT Admin 制品改为根入口与 `/admin/` 双构建；首次 Candidate 仍先通过
+本机 HTTP 验收，再单独启用 TLS。已有环境先确保 current/previous 均含双构建，才切换公网
+站点。TLS 启用后发布与回滚增加 HTTPS 验收，地址保持不变。完整顺序、legacy 过渡与启用
+标记契约见 [PUBLIC_IP_HTTPS.md](./PUBLIC_IP_HTTPS.md)。本段描述代码契约，不代表已上线。
+
 当前 UAT 使用“快速收敛”方案：
 
 ```text
