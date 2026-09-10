@@ -62,6 +62,13 @@ GNU_BASH = find_gnu_bash()
 
 
 class JoySongUatDeployContractTest(unittest.TestCase):
+    def test_admin_health_checks_use_the_uat_admin_subpath(self):
+        source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('"https://$ADMIN_PUBLIC_IP/admin/"', source)
+        self.assertIn('"https://$ADMIN_PUBLIC_IP/admin/orders"', source)
+        self.assertIn('"https://$ADMIN_PUBLIC_IP$asset_uri"', source)
+        self.assertIn('--resolve "$ADMIN_PUBLIC_IP:443:127.0.0.1"', source)
+
     maxDiff = None
 
     def run_bash(self, body):

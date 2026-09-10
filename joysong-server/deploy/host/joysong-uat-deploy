@@ -20,7 +20,7 @@ readonly SERVICE_USER=joysong-demo
 readonly SERVICE_GROUP=joysong-demo
 readonly RUNNER_USER=joysong-gh-runner
 readonly PORT=8080
-readonly ADMIN_HOST=joyingsong.net
+readonly ADMIN_PUBLIC_IP=121.41.230.98
 readonly HEALTH_TIMEOUT_SECONDS=90
 readonly OUTAGE_LIMIT_SECONDS=180
 readonly RECOVERY_RESERVE_SECONDS=90
@@ -621,19 +621,34 @@ verify_service_contract() {
 }
 
 verify_admin_locally() {
-  local expected_admin="$1" expected_sha response root_sha deep_sha
+  local expected_admin="$1" expected_sha response root_sha deep_sha asset_uri asset_relative asset_path asset_sha
   expected_sha="$(file_sha "$expected_admin/index.html")" || return 1
   response="$(mktemp "$STATE_ROOT/.admin-response.XXXXXX")" || return 1
     if ! run_with_timeout 10 curl -q --noproxy '*' --fail --silent --show-error --max-time 5 \
-      -H "Host: $ADMIN_HOST" --output "$response" http://127.0.0.1/; then
+      --resolve "$ADMIN_PUBLIC_IP:443:127.0.0.1" --output "$response" \
+      "https://$ADMIN_PUBLIC_IP/admin/"; then
     rm -f "$response"; return 1
   fi
   root_sha="$(file_sha "$response")"
   if ! run_with_timeout 10 curl -q --noproxy '*' --fail --silent --show-error --max-time 5 \
-      -H "Host: $ADMIN_HOST" --output "$response" http://127.0.0.1/orders; then
+      --resolve "$ADMIN_PUBLIC_IP:443:127.0.0.1" --output "$response" \
+      "https://$ADMIN_PUBLIC_IP/admin/orders"; then
     rm -f "$response"; return 1
   fi
   deep_sha="$(file_sha "$response")"
+  asset_uri="$(grep -Eo '/(admin/)?assets/[A-Za-z0-9._-]+\.(js|css)' "$expected_admin/index.html" | head -n 1)"
+  [[ -n "$asset_uri" ]] || { rm -f "$response"; return 1; }
+  asset_relative="${asset_uri#/admin/}"
+  asset_relative="${asset_relative#/}"
+  asset_path="$expected_admin/$asset_relative"
+  [[ -f "$asset_path" && ! -L "$asset_path" ]] || { rm -f "$response"; return 1; }
+  asset_sha="$(file_sha "$asset_path")"
+  if ! run_with_timeout 10 curl -q --noproxy '*' --fail --silent --show-error --max-time 5 \
+      --resolve "$ADMIN_PUBLIC_IP:443:127.0.0.1" --output "$response" \
+      "https://$ADMIN_PUBLIC_IP$asset_uri"; then
+    rm -f "$response"; return 1
+  fi
+  [[ "$(file_sha "$response")" == "$asset_sha" ]] || { rm -f "$response"; return 1; }
   rm -f "$response"
   [[ "$root_sha" == "$expected_sha" && "$deep_sha" == "$expected_sha" ]]
 }

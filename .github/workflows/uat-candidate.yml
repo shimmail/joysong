@@ -179,9 +179,14 @@ jobs:
           install -m 0644 "${jars[0]}" "$RUNNER_TEMP/release-input/joysong-server.jar"
       - name: Build admin
         working-directory: joysong-admin
+        env:
+          VITE_BASE_PATH: /admin/
         run: |
           npm ci
           npm run build
+          grep -Fq 'href="/admin/favicon.svg"' dist/index.html
+          grep -Fq 'src="/admin/assets/' dist/index.html
+          ! grep -Eq '(src|href)="/(assets|favicon|icons)' dist/index.html
       - name: Block high and critical vulnerabilities, secrets and misconfiguration
         uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
         with:

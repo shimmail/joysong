@@ -8,6 +8,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 VALIDATOR_PATH = ROOT / "joysong-server/deploy/ci/validate-workflows.py"
 QUALITY_WORKFLOW = ROOT / ".github/workflows/quality-gates.yml"
+UAT_WORKFLOW = ROOT / ".github/workflows/uat-candidate.yml"
+PROD_WORKFLOW = ROOT / ".github/workflows/prod-deploy.yml"
 
 spec = importlib.util.spec_from_file_location("validate_workflows", VALIDATOR_PATH)
 if spec is None or spec.loader is None:
@@ -52,6 +54,13 @@ class QualityGatesValidationTest(unittest.TestCase):
             '(.changes.outputs.flutter != "true")',
         )
         self.assertTrue(self.validate(changed))
+
+    def test_admin_subpath_build_is_limited_to_uat(self) -> None:
+        uat = UAT_WORKFLOW.read_text(encoding="utf-8")
+        prod = PROD_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("VITE_BASE_PATH: /admin/", uat)
+        self.assertIn("npm run build", uat)
+        self.assertNotIn("VITE_BASE_PATH: /admin/", prod)
 
 
 if __name__ == "__main__":
