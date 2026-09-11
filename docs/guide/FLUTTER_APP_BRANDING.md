@@ -1,15 +1,15 @@
 # App 名称与图标
 
-配置日期：2026-09-06。工程：`joysong-flutter`。
+最后同步：2026-09-11。工程：`joysong-flutter`。
 
 ## 名称与语言
 
 | 位置 | 中文 | 英文 |
 | --- | --- | --- |
-| 桌面应用名称、应用标题、登录品牌标题 | 娇颜颂 | JoySong |
+| 桌面应用名称、应用标题、登录品牌标题 | 娇颜颂 | JOYINGSONG |
 
 - 应用内首次启动默认中文，设置页可切换英文，重启后恢复已保存的语言。
-- 桌面名称使用原生语言资源：中文及默认资源为「娇颜颂」，英语环境显示 `JoySong`。桌面名称遵循操作系统的语言选择，应用内语言开关不会修改系统桌面名称。
+- 桌面名称使用原生语言资源：中文及默认资源为「娇颜颂」，英语环境显示 `JOYINGSONG`。桌面名称遵循操作系统的语言选择，应用内语言开关不会修改系统桌面名称。
 - Android：`android/app/src/main/res/values/strings.xml` 为默认名称，`values-zh` 与 `values-en` 为明确的语言资源。
 - iOS：`ios/Runner/Info.plist` 保留中文回退值，开发语言为 `zh-Hans`；`zh-Hans.lproj/InfoPlist.strings` 和 `en.lproj/InfoPlist.strings` 配置中英文名称，并接入 Xcode Resources。
 
@@ -33,7 +33,7 @@ python tool/generate_app_icons.py
 ## 设备验收
 
 1. 重新构建并安装，检查桌面图标、圆形裁切和 Android 主题色图标。
-2. 中文系统检查「娇颜颂」，英文系统检查 `JoySong`。
+2. 中文系统检查「娇颜颂」，英文系统检查 `JOYINGSONG`。
 3. 首次启动检查应用内默认中文；切换英文后检查标题和登录品牌名，重启确认语言恢复。
 4. macOS 上使用 Xcode 验证 iPhone/iPad 图标及 Archive。Windows 无法完成 iOS 编译与设备验收。
 

@@ -1,8 +1,8 @@
 # Flutter 前端迁移到 Mac 并构建 iOS
 
-核查日期：2026-09-06。目标是使用 macOS 构建 iPhone/iPad 应用；工程为 `joysong-flutter`。本指南不涉及 macOS 桌面版或旧 `joysong-app` 的移植。
+最后同步：2026-09-11。目标是使用 macOS 构建 iPhone/iPad 应用；工程为 `joysong-flutter`。本指南不涉及 macOS 桌面版或旧 `joysong-app` 的移植。
 
-当前已在 Windows 完成源码与配置核查，尚未在 Mac 上执行 Xcode、CocoaPods、模拟器或签名构建。下面的成功标准需要在目标 Mac 上实际验证。
+已在 macOS 15.0.1、Xcode 16.1、Flutter 3.44.8 和 CocoaPods 1.15.2 环境完成 CocoaPods 安装、Simulator 直接 Xcode 构建、安装和启动验证，详见 [iOS Runner 构建证据](../plan/ios-runner-build-evidence-20260908.md)。同一配置下 `flutter build ios --simulator --debug` 曾以 `Swift.CancellationError` 退出，不能将其标记为 Flutter wrapper 构建通过。真机签名、Archive、TestFlight 和 App Store 发布仍未验证。
 
 ## 1. 确认项目基线
 
@@ -11,13 +11,13 @@
 | Flutter | 本机缓存和生产 CI 均为 `3.44.8`，优先保持一致 |
 | Dart | 本机 SDK 为 `3.12.2`；锁文件要求 `>=3.12.0 <4.0.0` |
 | Flutter 锁文件下限 | `>=3.44.0`，不能只按 pubspec.yaml 的 Dart 3.3 下限安装旧 SDK |
-| iOS 最低版本 | Podfile、Xcode 工程和 AppFrameworkInfo.plist 配置为 `13.0`；仍需实际安装 Pods 验证插件要求 |
+| iOS 最低版本 | 已提交基线中 Podfile、Xcode 工程和 AppFrameworkInfo.plist 均为 `13.0`；CocoaPods 安装已验证 |
 | Xcode scheme | 只有 `Runner`，不传 Android 的 `--flavor development/uat/prod` |
 | Debug Bundle ID | `com.joysong.app.flutterdev` |
 | Profile Bundle ID | `com.joysong.app.flutterprofile` |
 | Release Bundle ID | `com.joysong.app` |
 | 默认 iOS API 地址 | `http://127.0.0.1:8080` |
-| iOS 原生依赖 | 已有 CocoaPods Podfile，目前未跟踪 Podfile.lock |
+| iOS 原生依赖 | CocoaPods（含 modular headers）与 `FlutterGeneratedPluginSwiftPackage`；`Podfile.lock` 仍按当前提交边界排除 |
 
 项目 README 的“共用 com.joysong.app”只适用于正式包，调试包以 Xcode 配置为准。
 
@@ -85,14 +85,13 @@ pod --version
 
 安装命令见 [Homebrew CocoaPods formula](https://formulae.brew.sh/formula/cocoapods)。
 
-本工程已使用 Podfile，首次迁移保持 CocoaPods 路径。Flutter 3.44.8 默认开启 Swift Package Manager，可在这台 Mac 上关闭后再继续：
+本工程已使用 Podfile，首次迁移保持 CocoaPods 路径。当前 Runner 工程也引用 Flutter 生成的 `FlutterGeneratedPluginSwiftPackage`，因此保持 Flutter 3.44.8 默认启用的 Swift Package Manager，不要为本工程关闭它：
 
 ```bash
-flutter config --no-enable-swift-package-manager
 flutter doctor -v
 ```
 
-这是当前用户的 Flutter 全局设置，会影响其他 Flutter 项目；需要恢复时使用 `flutter config --enable-swift-package-manager`。`flutter doctor -v` 中 Flutter、Xcode、CocoaPods 应正常；只构建 iOS 时，Android 工具链缺失不阻塞本步骤。
+`flutter doctor -v` 中 Flutter、Xcode、CocoaPods 应正常；只构建 iOS 时，Android 工具链缺失不阻塞本步骤。不要在此工程外全局调整 Swift Package Manager 设置，以免影响其他 Flutter 项目。
 
 ## 5. 在 Mac 重建依赖和本机配置
 
@@ -107,7 +106,7 @@ pod install
 cd ..
 ```
 
-不要使用 `flutter pub upgrade` 或常规性删除 `pubspec.lock`。当前仓库未跟踪 Podfile.lock，首次成功安装会生成它；审查后纳入版本控制，使后续 Mac 构建复用原生依赖版本。以后使用 `pod install` 保留锁定版本。
+不要使用 `flutter pub upgrade` 或常规性删除 `pubspec.lock`。当前提交边界不纳入 `Podfile.lock`；首次成功安装生成的本机文件应保留在工作区，并在调整该策略前不要加入提交。以后使用 `pod install` 保留本机解析出的依赖版本。
 
 检查 `ios/Flutter/Generated.xcconfig` 中的 `FLUTTER_ROOT` 和 `FLUTTER_APPLICATION_PATH` 已是 Mac 路径。它必须由 Mac 的 Flutter 生成，不应保留 `D:\...`。不要用 `flutter create .` 覆盖已有 iOS 工程，其中包含自定义文件选择器。
 
@@ -118,14 +117,14 @@ cd ..
 | 场景 | API_BASE_URL |
 | --- | --- |
 | iOS 模拟器，后端或 SSH 隧道运行在这台 Mac | `http://127.0.0.1:8080` |
-| 模拟器或真机连接已配置的 UAT 服务 | 实际可达的 UAT HTTPS 根地址 |
+| 模拟器或真机连接当前 UAT 服务 | `https://121.41.230.98` |
 | 真机连接开发电脑 | 电脑可达地址；额外核查监听地址、防火墙、iOS 本地网络权限和 ATS |
 
-传入服务器根地址即可，不追加 `/api`，Dart 网络层会解析到 `/api/`。UAT/production 强制 HTTPS。
+传入服务器根地址即可，不追加 `/api`，Dart 网络层会解析到 `/api/`。当前 UAT 直接使用公网 HTTPS IP，不需要 SSH 隧道；UAT/production 强制 HTTPS。
 
 **iPhone 上的 127.0.0.1 指向手机自身。USB 连接不会像 Android 的 adb reverse 一样把 Mac 的 8080 自动映射到 iPhone。** 首次建议先用模拟器；真机优先连接有效的 HTTPS 测试服务。
 
-如果沿用当前 ECS SSH 联调，参考 [SSH 隧道指南](deployment/SSH_TUNNEL.md)。Windows 上的 SSH 别名不会随 Git 自动迁移。把已授权专用密钥和已核验的 known_hosts 文件通过可信方式放入 Mac 的 `~/.ssh/`，设置目录权限 `700`、私钥权限 `600`，在 Mac 重建连接配置。按现有指南中的专用文件名，可在终端保持运行：
+仅在联调目标没有开放公网 HTTPS、且需要访问其 `127.0.0.1:8080` 时，才参考 [SSH 隧道指南](deployment/SSH_TUNNEL.md)。当前 UAT 不使用以下隧道路径。Windows 上的 SSH 别名不会随 Git 自动迁移。把已授权专用密钥和已核验的 known_hosts 文件通过可信方式放入 Mac 的 `~/.ssh/`，设置目录权限 `700`、私钥权限 `600`，在 Mac 重建连接配置。按现有指南中的专用文件名，可在终端保持运行：
 
 ```bash
 ssh -N -T \
@@ -138,7 +137,7 @@ ssh -N -T \
   joysong-tunnel@121.41.230.98
 ```
 
-上述服务器信息来自仓库指南，本次未重新验证远端状态；Mac 出口 IP 改变时需按该指南核对安全组。不要关闭主机公钥校验。在另一个 Mac 终端验证：
+上述隧道服务器信息来自仓库指南，本次未重新验证远端状态；Mac 出口 IP 改变时需按该指南核对安全组。不要关闭主机公钥校验。在另一个 Mac 终端验证：
 
 ```bash
 curl --noproxy '*' --max-time 10 -fsS http://127.0.0.1:8080/actuator/health
@@ -147,6 +146,8 @@ curl --noproxy '*' --max-time 10 -fsS http://127.0.0.1:8080/actuator/health
 返回 `{"status":"UP"}` 后，模拟器才具备已验证的后端连接路径。只做编译不需要运行后端；本流程不运行数据库迁移或服务端数据库测试。
 
 ## 7. 完成最小检查和模拟器构建
+
+已知验证结果：`pod install`、`flutter test test/core/config/app_environment_test.dart` 和 Simulator 直接 `xcodebuild` 均成功；直接构建、安装和启动使用 iPhone 16 Pro / iOS 18.1。`flutter analyze` 仍有两处 `LoginStrings` 测试代码错误，且下方 Flutter wrapper 命令曾以 `Swift.CancellationError` 退出。迁移到另一台 Mac 时仍应重新执行这些检查，不能复用本机构建结果。
 
 先执行环境配置相关测试与静态检查：
 
@@ -182,6 +183,8 @@ flutter run -d "实际模拟器ID" \
 
 CLI 不传 `--flavor`。修改 APP_ENV 或 API_BASE_URL 后，停止应用并重新运行，不能只热重载。
 
+该 Flutter wrapper 命令在已有验证环境中未通过；当前成功证据来自同一份 Flutter 生成配置的直接 Xcode 构建，完整命令和边界见 [iOS Runner 构建证据](../plan/ios-runner-build-evidence-20260908.md)。不要把直接 Xcode 构建成功表述为 Flutter wrapper 构建成功。
+
 ## 8. 配置真机签名并运行
 
 ```bash
@@ -194,15 +197,25 @@ open ios/Runner.xcworkspace
 4. 分别核对 Debug、Profile、Release 的 Bundle ID 和 Team。Debug 为 `com.joysong.app.flutterdev`，Release 为 `com.joysong.app`；APP_ENV 不会改变 iOS Bundle ID。若现有 ID 不属于自己的团队，调试时使用团队可签名的唯一 ID。当前暂不使用 Google 登录，无需配置 Google OAuth。
 5. 用 USB 连接 iPhone，解锁并选择“信任此电脑”。在需要的 iOS 版本上开启 设置 → 隐私与安全性 → 开发者模式，并按提示重启。
 6. 在 Xcode 设备窗口等待配对和支持组件准备完毕，执行 `flutter devices` 取得设备 ID。
-7. 使用已验证、具有有效证书的 HTTPS 测试地址运行；以下域名是占位值：
+7. 使用当前 UAT 公网 IP HTTPS 地址运行：
 
 ```bash
 flutter run -d "实际iPhone设备ID" \
   --dart-define=APP_ENV=uat \
-  --dart-define=API_BASE_URL=https://实际UAT域名
+  --dart-define=API_BASE_URL=https://121.41.230.98
 ```
 
 当前 UAT 模式使用密码登录，适合先验证基础链路。个人账号可用于受限制的真机开发测试；TestFlight/App Store 分发需要对应开发者计划资格。设备设置依据 [Flutter 真机配置指南](https://docs.flutter.dev/platform-integration/ios/setup)。
+
+仅验证 iOS Release 编译且暂不签名时，在 Mac 上执行：
+
+```bash
+flutter build ios --release --no-codesign \
+  --dart-define=APP_ENV=uat \
+  --dart-define=API_BASE_URL=https://121.41.230.98
+```
+
+该命令生成的是 UAT 配置，不是生产版本。需要安装到真机或上传 TestFlight 时，仍需在 Xcode 中配置有效签名并按下节生成 IPA。
 
 ## 9. 验证平台功能，再构建 IPA
 
@@ -212,7 +225,7 @@ flutter run -d "实际iPhone设备ID" \
 
 - **Google 登录**：用户确认当前暂不使用，暂不配置 OAuth client 或回调 URL scheme，不传入 Google 相关 dart-define，也不纳入本次迁移验收。当前通过密码登录验证认证链路；以后启用 Google 登录时再补齐配置及回跳测试。
 - **应用深链**：Dart 识别 `joysong` 和 UAT 的 `joysong-uat`，但 Info.plist 未注册这些 URL scheme。涉及浏览器回跳时要补齐原生注册并验证冷启动和运行中回跳。
-- **App 图标与名称**：正式图标已开发完成，已配置 Assets.xcassets/AppIcon 和中英文名称资源，默认中文「娇颜颂」、英文 `JoySong`。Mac 构建后核查图标预览及真机桌面显示即可，资源维护方式见 [App 名称与图标](FLUTTER_APP_BRANDING.md)。
+- **App 图标与名称**：正式图标已开发完成，已配置 Assets.xcassets/AppIcon 和中英文名称资源，默认中文「娇颜颂」、英文 `JOYINGSONG`。Mac 构建后核查图标预览及真机桌面显示即可，资源维护方式见 [App 名称与图标](FLUTTER_APP_BRANDING.md)。
 - **UIScene 生命周期**：当前 AppDelegate 在启动回调中注册插件、读取 window 并建立文件选择通道。新 Flutter 使用 UIScene，但自定义 AppDelegate 的迁移需要人工处理；先记录 Mac 构建提示。如果进行迁移，必须同时迁移 engine 回调、通道注册和选择器展示窗口，不能只添加 Scene Manifest。迁移后重测文件选择，参见 [Flutter UIScene 迁移说明](https://docs.flutter.dev/release/breaking-changes/uiscenedelegate)。这属于待验证风险，当前没有实际构建失败证据。
 - **本地网络**：现有 plist 包含 `NSAllowsLocalNetworking`，但没有 `NSLocalNetworkUsageDescription`。若采用真机访问局域网地址，需要按实际系统、URL 和网络权限报错补齐说明及精确 ATS 配置；不要默认所有 HTTP 地址都被放行。
 - **相机**：目前代码只从图库选择，已有双语相册权限说明；将来启用相机时再增加相机权限说明。

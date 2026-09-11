@@ -7,11 +7,11 @@ void main() {
       final environment = AppEnvironment.resolve(
         platform: AppPlatform.android,
         flavorName: 'uat',
-        baseUrl: 'https://api.joyingsong.net',
+        baseUrl: 'https://121.41.230.98',
       );
 
       expect(environment.flavor, AppFlavor.uat);
-      expect(environment.apiRoot.toString(), 'https://api.joyingsong.net/api/');
+      expect(environment.apiRoot.toString(), 'https://121.41.230.98/api/');
       expect(environment.allowsPreviewData, isFalse);
       expect(environment.usesPasswordOnlyLogin, isTrue);
       expect(environment.deepLinkScheme, 'joysong-uat');

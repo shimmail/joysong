@@ -3,7 +3,7 @@
 **计划编号**：IOS-GH-20260908<br>
 **适用仓库**：`joysong`<br>
 **目标分支**：`codex/ios-runner-build-docs`<br>
-**计划状态**：待实施 agent 执行
+**计划状态**：已完成（2026-09-08）
 
 ## 1. 目标
 
@@ -11,9 +11,18 @@
 
 本计划只覆盖“源码/工程配置 + 文档证据”的 Git 提交。不新增 SwiftUI、App Intents、App Shortcuts 或 Widget target，也不负责公开域名切换或 App Store 发布。
 
+## 1.1 实施结果
+
+- 工程配置提交：`f3aec861 fix(ios): configure Runner simulator build dependencies`，包含 Podfile、Runner Xcode 工程、共享 scheme 和 workspace 的 Simulator 构建依赖修复。
+- 证据文档提交：`e5b28dcd docs(ios): record simulator build and debug evidence`，包含本计划和 [iOS Runner 构建证据](ios-runner-build-evidence-20260908.md)。
+- 提交目标分支为 `codex/ios-runner-build-docs`；该分支与本地缓存的 `origin/codex/ios-runner-build-docs` 一致。
+- 本轮未提交 Pods、`Podfile.lock`、Flutter/Xcode 生成物、模拟器产物、签名文件或仅权限位变化的文件。
+
+本文件保留以下实施前基线、操作边界和任务文本，供后续同类提交复用；其命令不表示需要再次执行本轮提交。
+
 ## 2. 已知基线
 
-- 当前分支为 `master`，与 `origin/master` 同步；远端为 `git@github.com:shimmail/joysong.git`。
+- 实施前分支为 `master`，与当时的 `origin/master` 同步；远端为 `git@github.com:shimmail/joysong.git`。
 - 当前工作树约有 1,100 项以上未提交变更，主要分布在 UI、服务端、Admin、Android、Flutter 和文档；其中大量是 `100644 -> 100755` 权限位漂移。
 - 已完成一次 iOS Simulator Debug 启动验证：产物目标为 `joysong-flutter/build/ios/iphonesimulator/Runner.app`，设备为 iPhone 16 Pro / iOS 18.1。
 - 当前构建使用 `APP_ENV=development` 与 `API_BASE_URL=http://127.0.0.1:8080`，仅适用于本机或 SSH 隧道联调，不得标记为 UAT、TestFlight 或生产包。
